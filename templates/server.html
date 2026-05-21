@@ -1,0 +1,2803 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Registro dei Prof - Dashboard Utente</title>
+    <style>
+        /* ═══════════════════════════════════════════════════════════
+           RESET E STILI BASE
+           ═══════════════════════════════════════════════════════════ */
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%);
+            color: #333;
+            line-height: 1.6;
+            min-height: 100vh;
+            padding: 20px;
+            transition: all 0.3s ease;
+        }
+        
+        [data-theme="dark"] body {
+            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+            color: #eee;
+        }
+
+        /* ═══════════════════════════════════════════════════════════
+           HEADER E PULSANTI PRINCIPALI
+           ═══════════════════════════════════════════════════════════ */
+        .header-bar {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            flex-wrap: wrap;
+            gap: 15px;
+            margin-bottom: 30px;
+            padding: 15px 25px;
+            background: white;
+            border-radius: 15px;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.1);
+        }
+        
+        [data-theme="dark"] .header-bar {
+            background: #16213e;
+        }
+
+        .header-left, .header-right {
+            display: flex;
+            align-items: center;
+            gap: 15px;
+            flex-wrap: wrap;
+        }
+
+        .btn-esci {
+            background: linear-gradient(135deg, #f44336 0%, #d32f2f 100%);
+            color: white;
+            padding: 10px 25px;
+            border: none;
+            border-radius: 25px;
+            cursor: pointer;
+            font-weight: 600;
+            transition: all 0.3s ease;
+            box-shadow: 0 4px 12px rgba(244,67,54,0.3);
+        }
+
+        .btn-esci:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 20px rgba(244,67,54,0.4);
+        }
+
+        /* ═══════════════════════════════════════════════════════════
+           NOTIFICHE
+           ═══════════════════════════════════════════════════════════ */
+        .notifiche-container {
+            position: relative;
+            display: inline-block;
+        }
+
+        .btn-notifiche {
+            background: linear-gradient(135deg, #ff9966 0%, #ff5e62 100%);
+            width: 45px;
+            height: 45px;
+            border-radius: 50%;
+            border: none;
+            cursor: pointer;
+            font-size: 20px;
+            box-shadow: 0 4px 12px rgba(255,94,98,0.3);
+            transition: all 0.3s ease;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .btn-notifiche:hover {
+            transform: scale(1.1) rotate(15deg);
+            box-shadow: 0 6px 20px rgba(255,94,98,0.4);
+        }
+
+        .badge-notifiche {
+            position: absolute;
+            top: -5px;
+            right: -5px;
+            background: #f44336;
+            color: white;
+            border-radius: 50%;
+            padding: 3px 7px;
+            font-size: 11px;
+            font-weight: bold;
+            min-width: 20px;
+            text-align: center;
+            animation: pulse 2s infinite;
+        }
+
+        .badge-notifiche.nascosto { display: none; }
+
+        @keyframes pulse {
+            0%, 100% { transform: scale(1); }
+            50% { transform: scale(1.1); }
+        }
+
+        .dropdown-notifiche {
+            display: none;
+            position: absolute;
+            left: 0;
+            top: 55px;
+            background: white;
+            border-radius: 15px;
+            box-shadow: 0 10px 40px rgba(0,0,0,0.2);
+            min-width: 380px;
+            max-height: 450px;
+            overflow-y: auto;
+            z-index: 1000;
+            animation: slideDown 0.3s ease;
+        }
+
+        [data-theme="dark"] .dropdown-notifiche { background: #16213e; }
+
+        .dropdown-notifiche.aperto { display: block; }
+
+        .dropdown-notifiche h3 {
+            margin: 0;
+            padding: 18px 20px;
+            background: linear-gradient(135deg, #ff9966 0%, #ff5e62 100%);
+            color: white;
+            border-radius: 15px 15px 0 0;
+            font-size: 16px;
+            font-weight: 600;
+        }
+
+        .notifica-item {
+            padding: 18px 20px;
+            border-bottom: 1px solid #f0f0f0;
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
+
+        [data-theme="dark"] .notifica-item { border-bottom-color: #333; }
+
+        .notifica-item:hover {
+            background: linear-gradient(90deg, #f5f7fa 0%, #fff 100%);
+            transform: translateX(5px);
+        }
+
+        [data-theme="dark"] .notifica-item:hover { background: #0f3460; }
+
+        .notifica-item.nuova {
+            background: linear-gradient(90deg, #e3f2fd 0%, #fff 100%);
+            border-left: 4px solid #2196F3;
+        }
+
+        [data-theme="dark"] .notifica-item.nuova { background: #0d47a1; }
+
+        .notifica-item.letta { opacity: 0.7; }
+
+        .notifica-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 8px;
+        }
+
+        .notifica-tipo {
+            font-size: 10px;
+            padding: 3px 10px;
+            border-radius: 12px;
+            font-weight: 700;
+            text-transform: uppercase;
+        }
+
+        .notifica-tipo.ticket { background: #e3f2fd; color: #1565c0; }
+        .notifica-tipo.commento { background: #e8f5e9; color: #2e7d32; }
+        .notifica-tipo.messaggio { background: #fff3e0; color: #ef6c00; }
+        .notifica-tipo.sistema { background: #f3e5f5; color: #7b1fa2; }
+
+        .notifica-titolo {
+            font-weight: 600;
+            color: #333;
+            margin-bottom: 6px;
+            font-size: 14px;
+        }
+
+        [data-theme="dark"] .notifica-titolo { color: #eee; }
+
+        .notifica-messaggio {
+            font-size: 13px;
+            color: #666;
+            margin-bottom: 8px;
+            line-height: 1.5;
+        }
+
+        [data-theme="dark"] .notifica-messaggio { color: #ccc; }
+
+        .notifica-data {
+            font-size: 11px;
+            color: #999;
+        }
+
+        .notifica-azioni {
+            display: flex;
+            gap: 8px;
+            margin-top: 12px;
+        }
+
+        .notifica-azioni button {
+            padding: 6px 14px;
+            font-size: 11px;
+            border-radius: 20px;
+        }
+
+        .nessuna-notifica {
+            padding: 40px 20px;
+            text-align: center;
+            color: #999;
+            font-size: 14px;
+        }
+
+        .segna-tutte-lette {
+            padding: 15px 20px;
+            text-align: center;
+            border-top: 2px solid #f0f0f0;
+        }
+
+        [data-theme="dark"] .segna-tutte-lette { border-top-color: #333; }
+
+        .segna-tutte-lette button {
+            background: transparent;
+            color: #667eea;
+            border: 2px solid #667eea;
+            padding: 8px 20px;
+            border-radius: 25px;
+            font-size: 12px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
+
+        .segna-tutte-lette button:hover {
+            background: #667eea;
+            color: white;
+            transform: translateY(-2px);
+        }
+
+        /* ═══════════════════════════════════════════════════════════
+           ALTRI ELEMENTI HEADER
+           ═══════════════════════════════════════════════════════════ */
+        #syncBadge {
+            position: fixed;
+            top: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: linear-gradient(135deg, #4CAF50 0%, #45a049 100%);
+            color: white;
+            padding: 8px 20px;
+            border-radius: 25px;
+            font-size: 12px;
+            font-weight: 600;
+            z-index: 9999;
+            opacity: 0;
+            transition: all 0.3s ease;
+            box-shadow: 0 4px 12px rgba(76,175,80,0.3);
+        }
+
+        #syncBadge.show {
+            opacity: 1;
+            transform: translateX(-50%) translateY(-5px);
+        }
+
+        .theme-toggle {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+            width: 45px;
+            height: 45px;
+            border-radius: 50%;
+            cursor: pointer;
+            font-size: 20px;
+            box-shadow: 0 4px 12px rgba(102,126,234,0.3);
+            transition: all 0.3s ease;
+        }
+
+        .theme-toggle:hover {
+            transform: rotate(30deg) scale(1.1);
+            box-shadow: 0 6px 20px rgba(102,126,234,0.4);
+        }
+
+        /* ═══════════════════════════════════════════════════════════
+           PULSANTI AZIONI PRINCIPALI
+           ═══════════════════════════════════════════════════════════ */
+        .btn-azione-container {
+            text-align: right;
+            margin: 15px 0;
+        }
+
+        .btn-azione {
+            padding: 12px 28px;
+            border-radius: 30px;
+            font-weight: 600;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+            transition: all 0.3s ease;
+            border: none;
+            cursor: pointer;
+            font-size: 14px;
+        }
+
+        .btn-azione:hover {
+            transform: translateY(-3px);
+            box-shadow: 0 6px 20px rgba(0,0,0,0.2);
+        }
+
+        .btn-profilo {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+        }
+
+        .btn-storico {
+            background: linear-gradient(135deg, #11998e 0%, #38ef7d 100%);
+            color: white;
+        }
+
+        .btn-ticket {
+            background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
+            color: white;
+        }
+
+        /* ═══════════════════════════════════════════════════════════
+           SEZIONI ESPANDIBILI
+           ═══════════════════════════════════════════════════════════ */
+        .sezione-espandibile {
+            display: none;
+            background: white;
+            padding: 30px;
+            margin: 25px auto;
+            max-width: 900px;
+            border-radius: 20px;
+            box-shadow: 0 8px 30px rgba(0,0,0,0.12);
+            animation: slideDown 0.4s ease;
+        }
+
+        .sezione-espandibile.active { display: block; }
+
+        [data-theme="dark"] .sezione-espandibile {
+            background: #16213e;
+        }
+
+        .sezione-espandibile h3 {
+            margin: 0 0 25px 0;
+            color: #333;
+            border-bottom: 3px solid;
+            padding-bottom: 15px;
+            font-size: 22px;
+            font-weight: 700;
+        }
+
+        [data-theme="dark"] .sezione-espandibile h3 { color: #eee; }
+
+        #profiloSection h3 { border-color: #667eea; }
+        #storicoSection h3 { border-color: #11998e; }
+        #ticketSection h3 { border-color: #f5576c; }
+
+        /* ═══════════════════════════════════════════════════════════
+           STATISTICHE CARD
+           ═══════════════════════════════════════════════════════════ */
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+            gap: 20px;
+            margin-bottom: 30px;
+        }
+
+        .stat-card {
+            background: linear-gradient(135deg, #f5f7fa 0%, #e8ecef 100%);
+            padding: 20px;
+            border-radius: 15px;
+            text-align: center;
+            transition: all 0.3s ease;
+        }
+
+        [data-theme="dark"] .stat-card {
+            background: linear-gradient(135deg, #0f3460 0%, #16213e 100%);
+        }
+
+        .stat-card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 10px 30px rgba(0,0,0,0.15);
+        }
+
+        .stat-card .number {
+            font-size: 32px;
+            font-weight: 800;
+            margin-bottom: 5px;
+        }
+
+        .stat-card .label {
+            font-size: 12px;
+            color: #666;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+
+        [data-theme="dark"] .stat-card .label { color: #aaa; }
+
+        #storicoSection .stat-card .number { color: #11998e; }
+        #ticketSection .stat-card .number { color: #f5576c; }
+
+        /* ═══════════════════════════════════════════════════════════
+           SEZIONI PRINCIPALI (VOTI, RECENSIONI)
+           ═══════════════════════════════════════════════════════════ */
+        .sezione-principale {
+            background: white;
+            padding: 30px;
+            margin: 25px auto;
+            max-width: 900px;
+            border-radius: 20px;
+            box-shadow: 0 8px 30px rgba(0,0,0,0.12);
+        }
+
+        [data-theme="dark"] .sezione-principale {
+            background: #16213e;
+        }
+
+        .sezione-principale h2 {
+            margin: 0 0 25px 0;
+            color: #333;
+            border-bottom: 3px solid #4CAF50;
+            padding-bottom: 15px;
+            font-size: 24px;
+            font-weight: 700;
+        }
+
+        [data-theme="dark"] .sezione-principale h2 { color: #eee; }
+
+        /* ═══════════════════════════════════════════════════════════
+           TABELLE
+           ═══════════════════════════════════════════════════════════ */
+        .table-container {
+            overflow-x: auto;
+            margin: 20px 0;
+            border-radius: 12px;
+            box-shadow: 0 2px 15px rgba(0,0,0,0.08);
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            background: white;
+        }
+
+        [data-theme="dark"] table { background: #0f3460; }
+
+        th, td {
+            padding: 15px 18px;
+            text-align: left;
+            border-bottom: 1px solid #eee;
+        }
+
+        [data-theme="dark"] th, [data-theme="dark"] td {
+            border-bottom-color: #333;
+        }
+
+        th {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            font-weight: 600;
+            text-transform: uppercase;
+            font-size: 12px;
+            letter-spacing: 0.5px;
+        }
+
+        tr:hover {
+            background: #f8f9fa;
+        }
+
+        [data-theme="dark"] tr:hover { background: #1a253a; }
+
+        tr:last-child td { border-bottom: none; }
+
+        /* ═══════════════════════════════════════════════════════════
+           INPUT E FORM
+           ═══════════════════════════════════════════════════════════ */
+        input[type="text"],
+        input[type="number"],
+        input[type="email"],
+        input[type="password"],
+        select,
+        textarea {
+            padding: 12px 18px;
+            border: 2px solid #e0e0e0;
+            border-radius: 10px;
+            font-size: 14px;
+            transition: all 0.3s ease;
+            background: white;
+        }
+
+        [data-theme="dark"] input,
+        [data-theme="dark"] select,
+        [data-theme="dark"] textarea {
+            background: #0f3460;
+            border-color: #444;
+            color: #eee;
+        }
+
+        input:focus,
+        select:focus,
+        textarea:focus {
+            outline: none;
+            border-color: #667eea;
+            box-shadow: 0 0 0 4px rgba(102,126,234,0.1);
+        }
+
+        input:read-only {
+            background: #f5f5f5;
+            cursor: not-allowed;
+        }
+
+        [data-theme="dark"] input:read-only { background: #1a1a2e; }
+
+        .input-section {
+            text-align: center;
+            margin-top: 25px;
+            padding: 25px;
+            background: #f8f9fa;
+            border-radius: 15px;
+        }
+
+        [data-theme="dark"] .input-section { background: #0f3460; }
+
+        /* ✅ AUTOCOMPLETE CONTAINER */
+        .autocomplete-container {
+            position: relative;
+            display: inline-block;
+            margin: 8px;
+            width: 100%;
+            max-width: 300px;
+        }
+        
+        .autocomplete-container input {
+            width: 100%;
+        }
+        
+        .autocomplete-box {
+            position: absolute;
+            top: 100%;
+            left: 0;
+            width: 100%;
+            max-height: 200px;
+            overflow-y: auto;
+            border: 2px solid #e0e0e0;
+            background: white;
+            display: none;
+            z-index: 1000;
+            border-radius: 12px;
+            box-shadow: 0 10px 40px rgba(0,0,0,0.15);
+            margin-top: 5px;
+        }
+
+        [data-theme="dark"] .autocomplete-box {
+            background: #0f3460;
+            border-color: #444;
+        }
+
+        .autocomplete-box div {
+            padding: 12px 18px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            border-bottom: 1px solid #f0f0f0;
+        }
+
+        [data-theme="dark"] .autocomplete-box div {
+            border-bottom-color: #333;
+        }
+
+        .autocomplete-box div:hover {
+            background: linear-gradient(90deg, #f5f7fa 0%, #fff 100%);
+            padding-left: 25px;
+        }
+
+        [data-theme="dark"] .autocomplete-box div:hover {
+            background: #1a253a;
+        }
+
+        /* ═══════════════════════════════════════════════════════════
+           PULSANTI GENERICI
+           ═══════════════════════════════════════════════════════════ */
+        button {
+            padding: 12px 24px;
+            background: linear-gradient(135deg, #4CAF50 0%, #45a049 100%);
+            color: white;
+            border: none;
+            border-radius: 10px;
+            cursor: pointer;
+            font-weight: 600;
+            transition: all 0.3s ease;
+            margin: 5px;
+            box-shadow: 0 4px 12px rgba(76,175,80,0.2);
+        }
+
+        button:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 20px rgba(76,175,80,0.3);
+        }
+
+        .btn-secondary {
+            background: linear-gradient(135deg, #6c757d 0%, #5a6268 100%) !important;
+        }
+
+        .btn-segnala {
+            background: linear-gradient(135deg, #FF9800 0%, #f57c00 100%) !important;
+        }
+
+        .btn-sm {
+            padding: 6px 14px;
+            font-size: 12px;
+        }
+
+        /* ═══════════════════════════════════════════════════════════
+           AVVISI
+           ═══════════════════════════════════════════════════════════ */
+        .avviso-box {
+            background: linear-gradient(135deg, #fff3cd 0%, #ffe8a1 100%);
+            border-left: 5px solid #ffc107;
+            padding: 25px;
+            margin: 25px auto;
+            max-width: 900px;
+            border-radius: 15px;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.1);
+        }
+
+        [data-theme="dark"] .avviso-box {
+            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+            border-left-color: #ffc107;
+        }
+
+        .avviso-box h3 {
+            margin: 0 0 20px 0;
+            color: #856404;
+            font-size: 18px;
+        }
+
+        [data-theme="dark"] .avviso-box h3 { color: #ffc107; }
+
+        .avviso-item {
+            background: white;
+            padding: 18px;
+            margin: 12px 0;
+            border-radius: 12px;
+            border-left: 5px solid #28a745;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.05);
+        }
+
+        [data-theme="dark"] .avviso-item {
+            background: #0f3460;
+        }
+
+        .avviso-item.urgente { border-left-color: #dc3545; }
+        .avviso-item.importante { border-left-color: #ffc107; }
+
+        /* ═══════════════════════════════════════════════════════════
+           MODAL
+           ═══════════════════════════════════════════════════════════ */
+        .modal {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0,0,0,0.6);
+            backdrop-filter: blur(5px);
+            justify-content: center;
+            align-items: center;
+            z-index: 3000;
+        }
+
+        .modal.active { display: flex; }
+
+        .modal .modal-content {
+            background: white;
+            padding: 35px;
+            border-radius: 25px;
+            width: 90%;
+            max-width: 550px;
+            box-shadow: 0 25px 80px rgba(0,0,0,0.3);
+            animation: slideUp 0.4s ease;
+        }
+
+        [data-theme="dark"] .modal .modal-content { background: #16213e; }
+
+        .modal .modal-content h3 {
+            margin: 0 0 25px 0;
+            color: #333;
+            font-size: 22px;
+            font-weight: 700;
+        }
+
+        [data-theme="dark"] .modal .modal-content h3 { color: #eee; }
+
+        .modal .form-group { margin-bottom: 20px; }
+
+        .modal .form-group label {
+            display: block;
+            margin-bottom: 8px;
+            color: #555;
+            font-weight: 600;
+            font-size: 14px;
+        }
+
+        [data-theme="dark"] .modal .form-group label { color: #ccc; }
+
+        .modal .form-group input,
+        .modal .form-group select,
+        .modal .form-group textarea {
+            width: 100%;
+            padding: 14px 18px;
+            border: 2px solid #e0e0e0;
+            border-radius: 12px;
+            font-size: 14px;
+        }
+
+        [data-theme="dark"] .modal .form-group input,
+        [data-theme="dark"] .modal .form-group select,
+        [data-theme="dark"] .modal .form-group textarea {
+            background: #0f3460;
+            border-color: #444;
+            color: #eee;
+        }
+
+        .modal .btn-group {
+            display: flex;
+            gap: 12px;
+            margin-top: 25px;
+            justify-content: flex-end;
+        }
+
+        /* ═══════════════════════════════════════════════════════════
+           LIKE/DISLIKE E COMMENTI
+           ═══════════════════════════════════════════════════════════ */
+        .recensione-card {
+            background: white;
+            padding: 20px;
+            margin: 15px 0;
+            border-radius: 12px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.08);
+        }
+
+        [data-theme="dark"] .recensione-card {
+            background: #0f3460;
+        }
+
+        .recensione-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 15px;
+            flex-wrap: wrap;
+            gap: 10px;
+        }
+
+        .recensione-autore {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .recensione-badge {
+            padding: 4px 12px;
+            border-radius: 20px;
+            font-size: 11px;
+            font-weight: 700;
+            text-transform: uppercase;
+        }
+
+        .recensione-badge.admin {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+        }
+
+        .recensione-badge.user {
+            background: linear-gradient(135deg, #11998e 0%, #38ef7d 100%);
+            color: white;
+        }
+
+        .recensione-azioni {
+            display: flex;
+            gap: 8px;
+            align-items: center;
+        }
+
+        .btn-like {
+            background: linear-gradient(135deg, #4CAF50 0%, #45a049 100%);
+            padding: 6px 14px;
+            border-radius: 20px;
+            font-size: 12px;
+            display: flex;
+            align-items: center;
+            gap: 5px;
+        }
+
+        .btn-like.active {
+            background: linear-gradient(135deg, #2e7d32 0%, #1b5e20 100%);
+        }
+
+        .btn-dislike {
+            background: linear-gradient(135deg, #f44336 0%, #d32f2f 100%);
+            padding: 6px 14px;
+            border-radius: 20px;
+            font-size: 12px;
+            display: flex;
+            align-items: center;
+            gap: 5px;
+        }
+
+        .btn-dislike.active {
+            background: linear-gradient(135deg, #c62828 0%, #b71c1c 100%);
+        }
+
+        .btn-comment {
+            background: linear-gradient(135deg, #2196F3 0%, #1976D2 100%);
+            padding: 6px 14px;
+            border-radius: 20px;
+            font-size: 12px;
+            display: flex;
+            align-items: center;
+            gap: 5px;
+        }
+
+        .commenti-section {
+            margin-top: 15px;
+            padding-top: 15px;
+            border-top: 2px solid #f0f0f0;
+        }
+
+        [data-theme="dark"] .commenti-section {
+            border-top-color: #333;
+        }
+
+        .commento-item {
+            background: #f8f9fa;
+            padding: 15px;
+            margin: 10px 0;
+            border-radius: 10px;
+            border-left: 4px solid #667eea;
+        }
+
+        [data-theme="dark"] .commento-item {
+            background: #1a253a;
+        }
+
+        .commento-item.admin {
+            border-left-color: #f5576c;
+        }
+
+        .commento-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 10px;
+            flex-wrap: wrap;
+            gap: 10px;
+        }
+
+        .commento-autore {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-weight: 600;
+            font-size: 13px;
+        }
+
+        .commento-badge {
+            padding: 2px 8px;
+            border-radius: 10px;
+            font-size: 10px;
+            font-weight: 700;
+            text-transform: uppercase;
+        }
+
+        .commento-badge.admin {
+            background: #667eea;
+            color: white;
+        }
+
+        .commento-badge.user {
+            background: #11998e;
+            color: white;
+        }
+
+        .commento-data {
+            font-size: 11px;
+            color: #999;
+        }
+
+        .commento-testo {
+            color: #333;
+            line-height: 1.6;
+            margin-bottom: 10px;
+        }
+
+        [data-theme="dark"] .commento-testo { color: #eee; }
+
+        .commento-azioni {
+            display: flex;
+            gap: 5px;
+            align-items: center;
+        }
+
+        .btn-comment-like {
+            background: none;
+            border: none;
+            padding: 4px 8px;
+            cursor: pointer;
+            font-size: 11px;
+            color: #666;
+            display: flex;
+            align-items: center;
+            gap: 3px;
+        }
+
+        .btn-comment-like:hover, .btn-comment-like.active {
+            color: #4CAF50;
+        }
+
+        .btn-comment-dislike {
+            background: none;
+            border: none;
+            padding: 4px 8px;
+            cursor: pointer;
+            font-size: 11px;
+            color: #666;
+            display: flex;
+            align-items: center;
+            gap: 3px;
+        }
+
+        .btn-comment-dislike:hover, .btn-comment-dislike.active {
+            color: #f44336;
+        }
+
+        .nuovo-commento-form {
+            margin-top: 15px;
+            display: flex;
+            gap: 10px;
+            flex-wrap: wrap;
+        }
+
+        .nuovo-commento-form textarea {
+            flex: 1;
+            min-width: 200px;
+            padding: 10px;
+            border: 2px solid #e0e0e0;
+            border-radius: 10px;
+            font-size: 13px;
+        }
+
+        [data-theme="dark"] .nuovo-commento-form textarea {
+            background: #0f3460;
+            border-color: #444;
+            color: #eee;
+        }
+
+        .nessun-commento {
+            text-align: center;
+            color: #999;
+            padding: 20px;
+            font-size: 13px;
+        }
+
+        /* ═══════════════════════════════════════════════════════════
+           ANIMAZIONI
+           ═══════════════════════════════════════════════════════════ */
+        @keyframes slideDown {
+            from { opacity: 0; transform: translateY(-30px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        @keyframes slideUp {
+            from { transform: translateY(40px); opacity: 0; }
+            to { transform: translateY(0); opacity: 1; }
+        }
+
+        /* ═══════════════════════════════════════════════════════════
+           RESPONSIVE
+           ═══════════════════════════════════════════════════════════ */
+        @media (max-width: 768px) {
+            .header-bar {
+                flex-direction: column;
+                align-items: stretch;
+            }
+
+            .header-left, .header-right {
+                justify-content: center;
+            }
+
+            .sezione-principale,
+            .sezione-espandibile,
+            .avviso-box {
+                margin: 15px;
+                padding: 20px;
+            }
+
+            .input-section input {
+                width: 100%;
+                max-width: none;
+            }
+
+            .dropdown-notifiche {
+                min-width: 320px;
+                left: -50px;
+            }
+        }
+
+        /* ═══════════════════════════════════════════════════════════
+           PRIORITÀ E STATI TICKET
+           ═══════════════════════════════════════════════════════════ */
+        .priorita-bassa { color: #4CAF50; font-weight: 600; }
+        .priorita-media { color: #FF9800; font-weight: 600; }
+        .priorita-alta { color: #ff5722; font-weight: 600; }
+        .priorita-urgente { color: #f44336; font-weight: 600; }
+
+        .stato-aperto { background: #e3f2fd; color: #1565c0; padding: 5px 12px; border-radius: 20px; font-size: 12px; font-weight: 600; }
+        .stato-in_lavorazione { background: #fff3e0; color: #ef6c00; padding: 5px 12px; border-radius: 20px; font-size: 12px; font-weight: 600; }
+        .stato-risolto { background: #e8f5e9; color: #2e7d32; padding: 5px 12px; border-radius: 20px; font-size: 12px; font-weight: 600; }
+        .stato-chiuso { background: #f5f5f5; color: #616161; padding: 5px 12px; border-radius: 20px; font-size: 12px; font-weight: 600; }
+
+        /* ═══════════════════════════════════════════════════════════
+           RISPOSTE TICKET
+           ═══════════════════════════════════════════════════════════ */
+        .risposta-item {
+            background: linear-gradient(135deg, #f5f7fa 0%, #fff 100%);
+            padding: 18px;
+            margin: 12px 0;
+            border-radius: 12px;
+            border-left: 4px solid #667eea;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.05);
+        }
+
+        [data-theme="dark"] .risposta-item {
+            background: #0f3460;
+        }
+
+        .risposta-item.admin { border-left-color: #f5576c; }
+
+        .risposta-header {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 12px;
+            font-size: 12px;
+            color: #666;
+        }
+
+        .risposta-messaggio {
+            color: #333;
+            line-height: 1.7;
+            font-size: 14px;
+        }
+
+        [data-theme="dark"] .risposta-messaggio { color: #eee; }
+    </style>
+</head>
+<body>
+
+{% if site_banner and site_banner.attivo and site_banner.messaggio %}
+<div role="banner" style="background:#1a237e;color:#fff;padding:10px 16px;text-align:center;font-size:14px;margin-bottom:12px;border-radius:8px;">
+    {{ site_banner.messaggio }}
+</div>
+{% endif %}
+
+<!-- Variabile username per JavaScript -->
+<script>
+    const USERNAME_CORRENTE = "{{ username | escape }}";
+</script>
+
+<!-- ═══════════════════════════════════════════════════════════
+     HEADER BAR
+     ═══════════════════════════════════════════════════════════ -->
+<div class="header-bar">
+    <div class="header-left">
+        <!-- 🔔 Notifiche -->
+        <div class="notifiche-container">
+            <button class="btn-notifiche" onclick="toggleNotifiche()" title="Notifiche">🔔</button>
+            <span id="badgeNotifiche" class="badge-notifiche nascosto">0</span>
+            <div id="dropdownNotifiche" class="dropdown-notifiche">
+                <h3>🔔 Notifiche</h3>
+                <div id="listaNotifiche"></div>
+                <div class="segna-tutte-lette">
+                    <button onclick="segnaTutteLette()">✅ Segna tutte come lette</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- 🚪 Esci -->
+        <button class="btn-esci" onclick="window.location.href='/login'">🚪 Esci</button>
+    </div>
+
+    <!-- 🔄 Sync Badge -->
+    <div id="syncBadge">🔄 Aggiornato</div>
+
+    <div class="header-right">
+        <!-- 🌙 Theme Toggle -->
+        <button class="theme-toggle" id="themeToggle" onclick="toggleTheme()" title="Cambia tema">🌙</button>
+
+        <!-- 👤 Profilo -->
+        <div class="btn-azione-container" style="margin: 0;">
+            <button class="btn-azione btn-profilo" onclick="toggleProfilo()">👤 Il Mio Profilo</button>
+        </div>
+    </div>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════════
+     SEZIONE PROFILO
+     ═══════════════════════════════════════════════════════════ -->
+<div class="sezione-espandibile" id="profiloSection">
+    <h3>👤 Il Mio Profilo</h3>
+    
+    <div class="profilo-field" style="margin-bottom: 20px;">
+        <label style="display: block; margin-bottom: 8px; color: #555; font-weight: 600;">Username</label>
+        <input type="text" id="profiloUsername" value="{{ username }}" readonly style="width: 100%;">
+        <small style="color: #999; font-size: 12px;">Non modificabile</small>
+    </div>
+    
+    <div class="profilo-field" style="margin-bottom: 20px;">
+        <label style="display: block; margin-bottom: 8px; color: #555; font-weight: 600;">Email</label>
+        <input type="email" id="profiloEmail" placeholder="La tua email" style="width: 100%;">
+    </div>
+    
+    <div class="profilo-field" style="margin-bottom: 20px;">
+        <label style="display: block; margin-bottom: 8px; color: #555; font-weight: 600;">Nome e Cognome</label>
+        <input type="text" id="profiloNome" placeholder="Il tuo nome e cognome" style="width: 100%;">
+    </div>
+    
+    <div class="profilo-field" style="margin-bottom: 20px;">
+        <label style="display: block; margin-bottom: 8px; color: #555; font-weight: 600;">Scuola</label>
+        <input type="text" id="profiloScuola" placeholder="La tua scuola" style="width: 100%;">
+    </div>
+    <div class="profilo-field" style="margin-bottom: 20px;">
+        <label style="display: block; margin-bottom: 8px; color: #555; font-weight: 600;">Telefono</label>
+        <input type="text" id="profiloTel" placeholder="Opzionale" style="width: 100%;">
+    </div>
+    <div class="profilo-field" style="margin-bottom: 20px;">
+        <label style="display: block; margin-bottom: 8px; color: #555; font-weight: 600;">Indirizzo / Città / CAP</label>
+        <input type="text" id="profiloIndirizzo" placeholder="Indirizzo" style="width:100%;margin-bottom:6px;">
+        <input type="text" id="profiloCitta" placeholder="Città" style="width:48%;margin-right:4%;display:inline-block;">
+        <input type="text" id="profiloCap" placeholder="CAP" style="width:48%;">
+    </div>
+    <div class="profilo-field" style="margin-bottom: 20px;">
+        <label style="display: block; margin-bottom: 8px; color: #555; font-weight: 600;">Data di nascita</label>
+        <input type="text" id="profiloNascita" placeholder="AAAA-MM-GG (opzionale)" style="width: 100%;">
+    </div>
+    <p style="margin:14px 0;font-size:14px;line-height:1.5;"><a href="{{ url_for('privacy_informativa') }}" target="_blank" rel="noopener noreferrer">Leggi l'informativa sulla privacy</a></p>
+    <div style="display:flex;flex-wrap:wrap;gap:10px;margin-bottom:16px;">
+        <button type="button" class="btn btn-secondary btn-sm" onclick="window.location.href='/api/privacy/export'">📄 Esporta dati (JSON)</button>
+        <button type="button" class="btn btn-secondary btn-sm" onclick="window.location.href='/api/privacy/export.csv'">📄 Esporta dati (CSV)</button>
+        <button type="button" class="btn btn-secondary btn-sm" onclick="caricaAccessLog()">🔒 Ultimi accessi (IP / dispositivo)</button>
+        <button type="button" class="btn btn-danger btn-sm" onclick="richiediCancellazioneAccount()">🗑️ Richiedi cancellazione account</button>
+    </div>
+    <pre id="accessLogBox" style="display:none;background:#f5f7fa;padding:12px;border-radius:8px;max-height:220px;overflow:auto;font-size:12px;"></pre>
+    
+    <div class="profilo-field" style="margin-bottom: 25px;">
+        <label style="display: block; margin-bottom: 8px; color: #555; font-weight: 600;">Nuova Password (opzionale)</label>
+        <input type="password" id="profiloPassword" placeholder="Lascia vuoto per non cambiare" style="width: 100%;">
+        <small style="color: #999; font-size: 12px;">Minimo 4 caratteri</small>
+    </div>
+    
+    <div class="profilo-actions" style="display: flex; gap: 10px; justify-content: flex-end;">
+        <button class="btn btn-secondary" onclick="toggleProfilo()">❌ Chiudi</button>
+        <button class="btn btn-success" onclick="salvaProfilo()">💾 Salva Modifiche</button>
+    </div>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════════
+     SEZIONE STORICO VOTI
+     ═══════════════════════════════════════════════════════════ -->
+<div class="btn-azione-container">
+    <button class="btn-azione btn-storico" onclick="toggleStorico()">📊 Il Mio Storico Voti</button>
+</div>
+
+<div class="sezione-espandibile" id="storicoSection">
+    <h3>📊 Il Mio Storico Voti</h3>
+    
+    <div class="stats-grid">
+        <div class="stat-card">
+            <div class="number" id="statTotaleVoti">0</div>
+            <div class="label">Voti Totali</div>
+        </div>
+        <div class="stat-card">
+            <div class="number" id="statMediaVoti">-</div>
+            <div class="label">Media Voti</div>
+        </div>
+        <div class="stat-card">
+            <div class="number" id="statMateriaPreferita">-</div>
+            <div class="label">Materia Preferita</div>
+        </div>
+    </div>
+    
+    <div class="table-container">
+        <table id="tabellaStoricoVoti">
+            <thead>
+                <tr>
+                    <th>Professore</th>
+                    <th>Materia</th>
+                    <th>Scuola</th>
+                    <th>Voto</th>
+                    <th>Data</th>
+                    <th>Azioni</th>
+                </tr>
+            </thead>
+            <tbody></tbody>
+        </table>
+    </div>
+    
+    <div class="profilo-actions" style="display: flex; gap: 10px; justify-content: flex-end; margin-top: 20px;">
+        <button class="btn btn-secondary" onclick="toggleStorico()">❌ Chiudi</button>
+        <button class="btn btn-primary" onclick="caricaStoricoVoti()">🔄 Aggiorna</button>
+    </div>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════════
+     SEZIONE TICKET
+     ═══════════════════════════════════════════════════════════ -->
+<div class="btn-azione-container">
+    <button class="btn-azione btn-ticket" onclick="toggleTicket()">🎫 Supporto Ticket</button>
+</div>
+<div class="btn-azione-container">
+    <button class="btn-azione btn-storico" onclick="toggleGruppi()">👥 Gruppi</button>
+    <button class="btn-azione btn-storico" onclick="toggleSocial()">🤝 Social</button>
+    <button class="btn-azione btn-storico" onclick="togglePreferiti()">⭐ Preferiti Prof</button>
+    <button class="btn-azione btn-storico" onclick="toggleMateriali()">📚 Materiale didattico</button>
+    <button class="btn-azione btn-storico" onclick="toggleCalendario()">📅 Calendario esami</button>
+</div>
+
+<div class="sezione-espandibile" id="ticketSection">
+    <h3>🎫 I Miei Ticket di Supporto</h3>
+    
+    <div class="stats-grid">
+        <div class="stat-card">
+            <div class="number" id="statTicketTotali">0</div>
+            <div class="label">Ticket Totali</div>
+        </div>
+        <div class="stat-card">
+            <div class="number" id="statTicketAperti">0</div>
+            <div class="label">Aperti</div>
+        </div>
+        <div class="stat-card">
+            <div class="number" id="statTicketRisolti">0</div>
+            <div class="label">Risolti</div>
+        </div>
+    </div>
+    
+    <button class="btn btn-success" onclick="apriNuovoTicket()" style="margin-bottom: 20px;">➕ Nuovo Ticket</button>
+    
+    <div class="table-container">
+        <table id="tabellaTicket">
+            <thead>
+                <tr>
+                    <th>ID</th>
+                    <th>Oggetto</th>
+                    <th>Priorità</th>
+                    <th>Stato</th>
+                    <th>Data</th>
+                    <th>Azioni</th>
+                </tr>
+            </thead>
+            <tbody></tbody>
+        </table>
+    </div>
+    
+    <div class="profilo-actions" style="display: flex; gap: 10px; justify-content: flex-end; margin-top: 20px;">
+        <button class="btn btn-secondary" onclick="toggleTicket()">❌ Chiudi</button>
+        <button class="btn btn-primary" onclick="caricaTicket()">🔄 Aggiorna</button>
+    </div>
+</div>
+
+<div class="sezione-espandibile" id="gruppiSection">
+    <h3>👥 Gruppi</h3>
+    <div class="input-section">
+        <input type="text" id="groupNome" placeholder="Nome gruppo">
+        <input type="text" id="groupScuola" placeholder="Scuola (deve essere la tua)">
+        <input type="text" id="groupDesc" placeholder="Descrizione gruppo">
+        <button class="btn btn-success" onclick="creaGruppo()">➕ Crea gruppo</button>
+    </div>
+    <div class="table-container">
+        <table id="tabellaGruppi"><thead><tr><th>ID</th><th>Nome</th><th>Scuola</th><th>Creatore</th><th>Azioni</th></tr></thead><tbody></tbody></table>
+    </div>
+</div>
+
+<div class="sezione-espandibile" id="socialSection">
+    <h3>🤝 Social utenti</h3>
+    <div class="input-section">
+        <input type="text" id="searchUserText" placeholder="Cerca utenti (min 2 caratteri)">
+        <button class="btn btn-primary" onclick="cercaUtentiSocial()">🔎 Cerca</button>
+        <button class="btn btn-secondary" onclick="caricaSeguiti()">🔄 Seguiti</button>
+    </div>
+    <div class="table-container">
+        <table id="tabellaRicercaUtenti"><thead><tr><th>Username</th><th>Nome</th><th>Scuola</th><th>Ruolo</th><th>Azioni</th></tr></thead><tbody></tbody></table>
+    </div>
+    <h4 style="margin-top:18px;">Seguiti</h4>
+    <ul id="listaSeguiti"></ul>
+</div>
+
+<div class="sezione-espandibile" id="preferitiSection">
+    <h3>⭐ Professori preferiti</h3>
+    <div class="input-section">
+        <input type="text" id="prefProfNome" placeholder="Nome professore">
+        <input type="text" id="prefMateria" placeholder="Materia (opzionale)">
+        <input type="text" id="prefScuola" placeholder="Scuola">
+        <button class="btn btn-success" onclick="aggiungiPreferito()">➕ Aggiungi preferito</button>
+    </div>
+    <div class="table-container">
+        <table id="tabellaPreferiti"><thead><tr><th>ID</th><th>Etichetta</th><th>Chiave</th><th>Azioni</th></tr></thead><tbody></tbody></table>
+    </div>
+</div>
+
+<div class="sezione-espandibile" id="materialiSection">
+    <h3>📚 Materiale didattico</h3>
+    <form id="formMaterialeUpload" class="input-section" onsubmit="event.preventDefault(); uploadMateriale();">
+        <input type="text" id="matTitolo" placeholder="Titolo materiale">
+        <input type="text" id="matProf" placeholder="Professore">
+        <input type="text" id="matMateria" placeholder="Materia">
+        <input type="text" id="matScuola" placeholder="Scuola">
+        <input type="file" id="matFile" required>
+        <button class="btn btn-success" type="submit">⬆️ Carica</button>
+    </form>
+    <div class="table-container">
+        <table id="tabellaMateriali"><thead><tr><th>ID</th><th>Titolo</th><th>Prof</th><th>Scuola</th><th>Data</th><th>Azioni</th></tr></thead><tbody></tbody></table>
+    </div>
+</div>
+
+<div class="sezione-espandibile" id="calendarioSection">
+    <h3>📅 Calendario esami / verifiche</h3>
+    <div class="input-section">
+        <input type="text" id="evTitolo" placeholder="Titolo evento">
+        <input type="text" id="evMateria" placeholder="Materia">
+        <input type="text" id="evScuola" placeholder="Scuola">
+        <input type="number" id="evGroupId" placeholder="Group ID (opzionale)">
+        <input type="datetime-local" id="evQuando">
+        <input type="text" id="evNote" placeholder="Note">
+        <button class="btn btn-success" onclick="creaEventoEsame()">➕ Crea evento</button>
+    </div>
+    <div class="table-container">
+        <table id="tabellaEventi"><thead><tr><th>ID</th><th>Titolo</th><th>Materia</th><th>Scuola</th><th>Quando</th><th>Gruppo</th><th>Azioni</th></tr></thead><tbody></tbody></table>
+    </div>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════════
+     AVVISI
+     ═══════════════════════════════════════════════════════════ -->
+{% if avvisi %}
+<div class="avviso-box">
+    <h3>📢 Avvisi Importanti</h3>
+    {% for avviso in avvisi %}
+    <div class="avviso-item {% if avviso.priority == 'urgente' %}urgente{% elif avviso.priority == 'importante' %}importante{% endif %}">
+        <strong style="color: #333; display: block; margin-bottom: 8px;">{{ avviso.titolo }}</strong>
+        <p style="margin: 0 0 10px 0; color: #666; line-height: 1.6;">{{ avviso.contenuto }}</p>
+        <small style="color: #999; font-size: 12px;">📅 {{ avviso.created_at }}</small>
+    </div>
+    {% endfor %}
+</div>
+{% endif %}
+
+<!-- ═══════════════════════════════════════════════════════════
+     GESTIONE VOTI
+     ═══════════════════════════════════════════════════════════ -->
+<div class="btn-azione-container">
+    <button class="btn-azione btn-storico" onclick="toggleGestioneVoti()">📊 Gestione Voti</button>
+    <button class="btn-azione btn-storico" onclick="toggleGestioneRecensioni()">💬 Gestione Recensioni</button>
+</div>
+<div class="sezione-principale" id="gestioneVotiSection" style="display:none;">
+    <h2>📊 Gestione Voti</h2>
+    
+    <input type="text" id="searchVoti" placeholder="🔍 Cerca per Professore o Materia" oninput="filtroVoti()" style="width: 100%; max-width: 400px; margin: 15px 0; display: block;">
+    
+    <div class="table-container">
+        <table id="tabellaVoti">
+            <thead>
+                <tr>
+                    <th>Nome Professore</th>
+                    <th>Materia</th>
+                    <th>Scuola</th>
+                    <th>Voto</th>
+                    <th>Azioni</th>
+                </tr>
+            </thead>
+            <tbody></tbody>
+        </table>
+    </div>
+    
+    <div class="input-section">
+        <div class="autocomplete-container">
+            <input type="text" id="nomeProf" placeholder="Nome Professore" oninput="mostraSuggerimenti()" onfocus="mostraSuggerimenti()">
+            <div id="suggerimentiProf" class="autocomplete-box"></div>
+        </div>
+        
+        <div class="autocomplete-container">
+            <input type="text" id="materia" placeholder="Materia" readonly>
+        </div>
+        
+        <div class="autocomplete-container">
+            <input type="text" id="voto" placeholder="Voto (1-10)" oninput="validareVoto()">
+        </div>
+        <br>
+        <button onclick="aggiungiVoto()">➕ Aggiungi</button>
+        <button onclick="annullaInput()" class="btn-secondary">❌ Annulla</button>
+        <button onclick="apriFormProf()" class="btn-secondary">👨‍🏫 Aggiungi Professore</button>
+    </div>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════════
+     GESTIONE RECENSIONI (CON LIKE, COMMENTI E SCUOLA)
+     ═══════════════════════════════════════════════════════════ -->
+<div class="sezione-principale" id="gestioneRecensioniSection" style="display:none;">
+    <h2>💬 Gestione Recensioni</h2>
+    
+    <div id="listaRecensioni"></div>
+    
+    <div class="input-section">
+        <div class="autocomplete-container">
+            <input type="text" id="nomeStudente" placeholder="Nome Studente">
+        </div>
+        
+        <div class="autocomplete-container">
+            <input type="text" id="nomeProfRec" placeholder="Nome Professore" oninput="mostraSuggerimentiRec()" onfocus="mostraSuggerimentiRec()">
+            <div id="suggerimentiProfRec" class="autocomplete-box"></div>
+        </div>
+        
+        <div class="autocomplete-container">
+            <input type="text" id="scuolaRec" placeholder="Scuola" oninput="mostraSuggerimentiScuola()" onfocus="mostraSuggerimentiScuola()">
+            <div id="suggerimentiScuolaRec" class="autocomplete-box"></div>
+        </div>
+        
+        <div class="autocomplete-container">
+            <input type="text" id="recensione" placeholder="Recensione">
+        </div>
+        <input type="hidden" id="profRecProfessorId" value="">
+        <label style="display:block;margin-top:8px;"><input type="checkbox" id="recensioneAnonima"> Pubblica come <strong>Anonimo</strong> (il nome è visibile solo agli admin)</label>
+        <br>
+        <button onclick="aggiungiRecensione()">➕ Aggiungi Recensione</button>
+        <button onclick="annullaRecensione()" class="btn-secondary">❌ Annulla</button>
+    </div>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════════
+     MODAL AGGIUNGI PROFESSORE
+     ═══════════════════════════════════════════════════════════ -->
+<div class="modal" id="modalProf">
+    <div class="modal-content">
+        <h3>➕ Aggiungi Professore</h3>
+        <div class="form-group">
+            <label>Nome Professore</label>
+            <input type="text" id="formNomeProf" placeholder="Nome Professore">
+        </div>
+        <div class="form-group">
+            <label>Materia</label>
+            <input type="text" id="formMateriaProf" placeholder="Materia">
+        </div>
+        <div class="form-group">
+            <label>Scuola</label>
+            <input type="text" id="formScuolaProf" placeholder="Scuola">
+        </div>
+        <div class="btn-group">
+            <button class="btn btn-secondary" onclick="chiudiFormProf()">❌ Annulla</button>
+            <button class="btn btn-success" onclick="salvaProfessore()">💾 Salva</button>
+        </div>
+    </div>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════════
+     MODAL SEGNALAZIONE
+     ═══════════════════════════════════════════════════════════ -->
+<div class="modal" id="modalSegnalazione">
+    <div class="modal-content">
+        <h3>🚩 Segnala Contenuto</h3>
+        <p style="color: #666; margin-bottom: 20px; line-height: 1.6;">Segnala questo contenuto come inappropriato. La segnalazione verrà revisionata dall'admin.</p>
+        
+        <div class="form-group">
+            <label>Motivo della segnalazione</label>
+            <select id="formMotivoSegnalazione">
+                <option value="">Seleziona un motivo...</option>
+                <option value="spam">📧 Spam o pubblicità</option>
+                <option value="offensivo">😤 Contenuto offensivo</option>
+                <option value="falso">❌ Informazioni false</option>
+                <option value="altro">📝 Altro</option>
+            </select>
+        </div>
+        
+        <div class="form-group">
+            <label>Dettagli aggiuntivi (opzionale)</label>
+            <textarea id="formNotaSegnalazione" placeholder="Descrivi meglio il problema..." style="min-height: 100px;"></textarea>
+        </div>
+        
+        <div class="btn-group">
+            <button class="btn btn-secondary" onclick="chiudiSegnalazione()">❌ Annulla</button>
+            <button class="btn btn-success" onclick="inviaSegnalazione()">📤 Invia Segnalazione</button>
+        </div>
+    </div>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════════
+     MODAL NUOVO TICKET
+     ═══════════════════════════════════════════════════════════ -->
+<div class="modal" id="modalNuovoTicket">
+    <div class="modal-content">
+        <h3>➕ Nuovo Ticket di Supporto</h3>
+        
+        <div class="form-group">
+            <label>Oggetto</label>
+            <input type="text" id="ticketOggetto" placeholder="Breve descrizione del problema">
+        </div>
+        
+        <div class="form-group">
+            <label>Messaggio</label>
+            <textarea id="ticketMessaggio" placeholder="Descrivi il tuo problema in dettaglio..." style="min-height: 120px;"></textarea>
+        </div>
+        
+        <div class="form-group">
+            <label>Priorità</label>
+            <select id="ticketPriorita">
+                <option value="bassa">🟢 Bassa - Non urgente</option>
+                <option value="media" selected>🟡 Media - Normale</option>
+                <option value="alta">🟠 Alta - Importante</option>
+                <option value="urgente">🔴 Urgente - Subito</option>
+            </select>
+        </div>
+        
+        <div class="btn-group">
+            <button class="btn btn-secondary" onclick="chiudiNuovoTicket()">❌ Annulla</button>
+            <button class="btn btn-success" onclick="creaTicket()">📤 Crea Ticket</button>
+        </div>
+    </div>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════════
+     MODAL DETTAGLIO TICKET
+     ═══════════════════════════════════════════════════════════ -->
+<div class="modal" id="modalDettaglioTicket">
+    <div class="modal-content" style="max-width: 700px;">
+        <h3 id="dettaglioTicketOggetto">🎫 Dettaglio Ticket</h3>
+        
+        <div id="dettaglioTicketInfo" style="margin: 20px 0; padding: 20px; background: #f8f9fa; border-radius: 12px;"></div>
+        
+        <div id="dettaglioTicketRisposte" style="margin: 20px 0; max-height: 350px; overflow-y: auto;"></div>
+        
+        <div class="form-group">
+            <label>La tua risposta</label>
+            <textarea id="ticketRisposta" placeholder="Scrivi la tua risposta..." style="min-height: 100px;"></textarea>
+        </div>
+        
+        <div class="btn-group">
+            <button class="btn btn-secondary" onclick="chiudiDettaglioTicket()">❌ Chiudi</button>
+            <button class="btn btn-success" onclick="inviaRispostaTicket()">📤 Invia Risposta</button>
+        </div>
+    </div>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════════
+     JAVASCRIPT
+     ═══════════════════════════════════════════════════════════ -->
+<script>
+    // ================= VARIABILI GLOBALI =================
+    let editingVoto = null;
+    let editingRecensione = null;
+    let listaProfessori = [];
+    const SYNC_INTERVAL = 10000;
+    let segnalazioneTipo = null;
+    let segnalazioneIndice = null;
+    let ticketCorrenteId = null;
+
+    // ================= THEME TOGGLE =================
+    function toggleTheme() {
+        const body = document.body;
+        const current = body.getAttribute('data-theme');
+        const next = current === 'dark' ? 'light' : 'dark';
+        body.setAttribute('data-theme', next);
+        localStorage.setItem('theme', next);
+        document.getElementById('themeToggle').textContent = next === 'dark' ? '🌞' : '🌙';
+    }
+
+    // ================= BADGE SYNC =================
+    function mostraToast(messaggio, tipo = 'success') {
+        const badge = document.getElementById('syncBadge');
+        badge.textContent = messaggio;
+        badge.className = 'show ' + (tipo === 'error' ? 'error' : '');
+        setTimeout(() => badge.className = '', 2000);
+    }
+
+    // 🔔 ================= NOTIFICHE =================
+    function toggleNotifiche() {
+        const dropdown = document.getElementById('dropdownNotifiche');
+        dropdown.classList.toggle('aperto');
+        if(dropdown.classList.contains('aperto')) {
+            caricaNotifiche();
+        }
+    }
+
+    async function caricaNotifiche() {
+        try {
+            const response = await fetch(`/api/notifiche?t=${Date.now()}`);
+            const notifiche = await response.json();
+            const lista = document.getElementById('listaNotifiche');
+            
+            const nonLetto = notifiche.filter(n => !n.letta).length;
+            const badge = document.getElementById('badgeNotifiche');
+            if(nonLetto > 0) {
+                badge.textContent = nonLetto > 99 ? '99+' : nonLetto;
+                badge.classList.remove('nascosto');
+            } else {
+                badge.classList.add('nascosto');
+            }
+            
+            if(notifiche.length === 0) {
+                lista.innerHTML = '<div class="nessuna-notifica">🎉 Nessuna notifica</div>';
+                return;
+            }
+            
+            lista.innerHTML = notifiche.map(n => `
+                <div class="notifica-item ${n.letta ? 'letta' : 'nuova'}" onclick="apriNotifica(${n.id})">
+                    <div class="notifica-header">
+                        <span class="notifica-tipo ${n.tipo}">${n.tipo}</span>
+                        <span class="notifica-data">${n.data}</span>
+                    </div>
+                    <div class="notifica-titolo">${n.titolo}</div>
+                    <div class="notifica-messaggio">${n.messaggio}</div>
+                    ${n.link ? `<div class="notifica-azioni"><button class="btn btn-primary btn-sm" onclick="event.stopPropagation(); window.location.href='${n.link}'">👁️ Vedi</button></div>` : ''}
+                </div>
+            `).join('');
+        } catch(e) { console.error("Errore caricaNotifiche:", e); }
+    }
+
+    async function apriNotifica(id) {
+        try {
+            await fetch(`/api/notifiche/${id}`, {
+                method: 'PUT',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({ letta: true })
+            });
+            caricaNotifiche();
+        } catch(e) { console.error("Errore apriNotifica:", e); }
+    }
+
+    async function segnaTutteLette() {
+        try {
+            await fetch('/api/notifiche/segna-tutte-lette', { method: 'POST' });
+            caricaNotifiche();
+            mostraToast('✅ Tutte le notifiche segnate come lette');
+        } catch(e) { console.error("Errore segnaTutteLette:", e); }
+    }
+
+    document.addEventListener('click', (e) => {
+        const container = document.querySelector('.notifiche-container');
+        const dropdown = document.getElementById('dropdownNotifiche');
+        if(!container.contains(e.target) && dropdown.classList.contains('aperto')) {
+            dropdown.classList.remove('aperto');
+        }
+    });
+
+    // ================= PROFILO =================
+    function toggleProfilo() {
+        const section = document.getElementById('profiloSection');
+        section.classList.toggle('active');
+        if(section.classList.contains('active')) {
+            caricaProfilo();
+        }
+    }
+
+    // ================= STORICO VOTI =================
+    function toggleStorico() {
+        const section = document.getElementById('storicoSection');
+        section.classList.toggle('active');
+        if(section.classList.contains('active')) {
+            caricaStoricoVoti();
+        }
+    }
+
+    // ================= TICKET =================
+    function toggleTicket() {
+        const section = document.getElementById('ticketSection');
+        section.classList.toggle('active');
+        if(section.classList.contains('active')) {
+            caricaTicket();
+        }
+    }
+    function toggleGestioneVoti() {
+        const s = document.getElementById('gestioneVotiSection');
+        if (!s) return;
+        const show = s.style.display === 'none';
+        s.style.display = show ? 'block' : 'none';
+        if (show) caricaVoti();
+    }
+    function toggleGestioneRecensioni() {
+        const s = document.getElementById('gestioneRecensioniSection');
+        if (!s) return;
+        const show = s.style.display === 'none';
+        s.style.display = show ? 'block' : 'none';
+        if (show) caricaRecensioni();
+    }
+
+    function toggleGruppi() {
+        const section = document.getElementById('gruppiSection');
+        section.classList.toggle('active');
+        if(section.classList.contains('active')) caricaGruppi();
+    }
+    function toggleSocial() {
+        const section = document.getElementById('socialSection');
+        section.classList.toggle('active');
+        if(section.classList.contains('active')) { cercaUtentiSocial(); caricaSeguiti(); }
+    }
+    function togglePreferiti() {
+        const section = document.getElementById('preferitiSection');
+        section.classList.toggle('active');
+        if(section.classList.contains('active')) caricaPreferiti();
+    }
+    function toggleMateriali() {
+        const section = document.getElementById('materialiSection');
+        section.classList.toggle('active');
+        if(section.classList.contains('active')) caricaMateriali();
+    }
+    function toggleCalendario() {
+        const section = document.getElementById('calendarioSection');
+        section.classList.toggle('active');
+        if(section.classList.contains('active')) caricaEventiEsame();
+    }
+
+    async function caricaGruppi() {
+        try {
+            const r = await fetch(`/api/gruppi?t=${Date.now()}`);
+            const rows = await r.json();
+            const tb = document.querySelector('#tabellaGruppi tbody');
+            if (!tb) return;
+            tb.innerHTML = (Array.isArray(rows) ? rows : []).map(g => `
+                <tr>
+                    <td>${g.id}</td><td>${g.nome || ''}</td><td>${g.scuola || ''}</td><td>${g.creator || ''}</td>
+                    <td><button class="btn btn-primary btn-sm" onclick="uniscitiGruppo(${g.id})">Unisciti</button></td>
+                </tr>`).join('');
+        } catch (e) { console.error('caricaGruppi', e); }
+    }
+    async function creaGruppo() {
+        const nome = document.getElementById('groupNome').value.trim();
+        const scuola = document.getElementById('groupScuola').value.trim();
+        const descrizione = document.getElementById('groupDesc').value.trim();
+        if (!nome) return alert('Nome gruppo obbligatorio');
+        const r = await fetch('/api/gruppi', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ nome, scuola, descrizione }) });
+        const j = await r.json().catch(()=>({}));
+        if (!r.ok) return alert('❌ ' + (j.error || 'Errore creazione gruppo'));
+        mostraToast('✅ Gruppo creato');
+        caricaGruppi();
+    }
+    async function uniscitiGruppo(gid) {
+        const r = await fetch(`/api/gruppi/${gid}/unisciti`, { method:'POST' });
+        const j = await r.json().catch(()=>({}));
+        if (!r.ok) return alert('❌ ' + (j.error || 'Errore'));
+        mostraToast('✅ Iscrizione al gruppo completata');
+    }
+
+    async function cercaUtentiSocial() {
+        const q = document.getElementById('searchUserText').value.trim();
+        const r = await fetch(`/api/utenti/cerca?q=${encodeURIComponent(q)}&t=${Date.now()}`);
+        const rows = await r.json().catch(()=>[]);
+        const tb = document.querySelector('#tabellaRicercaUtenti tbody');
+        if (!tb) return;
+        tb.innerHTML = (Array.isArray(rows) ? rows : []).map(u => `
+            <tr>
+                <td>${u.username}</td><td>${u.nome_cognome || ''}</td><td>${u.scuola || ''}</td><td>${u.role || 'user'}</td>
+                <td><button class="btn btn-success btn-sm" onclick="followUser(decodeURIComponent('${encodeURIComponent(u.username || '')}'))">Segui</button></td>
+            </tr>`).join('');
+    }
+    async function followUser(username) {
+        const r = await fetch(`/api/social/follow/${encodeURIComponent(username)}`, { method: 'POST' });
+        const j = await r.json().catch(()=>({}));
+        if (!r.ok) return alert('❌ ' + (j.error || 'Errore follow'));
+        mostraToast('✅ Utente seguito');
+        caricaSeguiti();
+    }
+    async function unfollowUser(username) {
+        const r = await fetch(`/api/social/follow/${encodeURIComponent(username)}`, { method: 'DELETE' });
+        const j = await r.json().catch(()=>({}));
+        if (!r.ok) return alert('❌ ' + (j.error || 'Errore unfollow'));
+        caricaSeguiti();
+    }
+    async function caricaSeguiti() {
+        const r = await fetch('/api/social/follow?t=' + Date.now());
+        const j = await r.json().catch(()=>({seguiti:[]}));
+        const list = document.getElementById('listaSeguiti');
+        if (!list) return;
+        const arr = Array.isArray(j.seguiti) ? j.seguiti : [];
+        list.innerHTML = arr.map(u => `<li>${u} <button class="btn btn-danger btn-sm" onclick="unfollowUser(decodeURIComponent('${encodeURIComponent(u || '')}'))">Smetti</button></li>`).join('');
+        if (!arr.length) list.innerHTML = '<li>Nessun utente seguito.</li>';
+    }
+
+    async function caricaPreferiti() {
+        const r = await fetch('/api/preferiti?t=' + Date.now());
+        const rows = await r.json().catch(()=>[]);
+        const tb = document.querySelector('#tabellaPreferiti tbody');
+        if (!tb) return;
+        tb.innerHTML = (Array.isArray(rows) ? rows : []).map(p => `
+            <tr><td>${p.id}</td><td>${p.etichetta || ''}</td><td>${p.chiave_prof || ''}</td>
+            <td><button class="btn btn-danger btn-sm" onclick="rimuoviPreferito(${p.id})">Rimuovi</button></td></tr>`).join('');
+    }
+    async function aggiungiPreferito() {
+        const professore_nome = document.getElementById('prefProfNome').value.trim();
+        const materia = document.getElementById('prefMateria').value.trim();
+        const scuola = document.getElementById('prefScuola').value.trim();
+        if (!professore_nome) return alert('Nome professore obbligatorio');
+        const r = await fetch('/api/preferiti', { method:'POST', headers:{'Content-Type':'application/json'},
+            body: JSON.stringify({ professore_nome, materia, scuola, etichetta: professore_nome }) });
+        const j = await r.json().catch(()=>({}));
+        if (!r.ok) return alert('❌ ' + (j.error || 'Errore preferito'));
+        caricaPreferiti();
+    }
+    async function rimuoviPreferito(pid) {
+        const r = await fetch(`/api/preferiti/${pid}`, { method:'DELETE' });
+        const j = await r.json().catch(()=>({}));
+        if (!r.ok) return alert('❌ ' + (j.error || 'Errore rimozione'));
+        caricaPreferiti();
+    }
+
+    async function caricaMateriali() {
+        const r = await fetch('/api/materiali?t=' + Date.now());
+        const rows = await r.json().catch(()=>[]);
+        const tb = document.querySelector('#tabellaMateriali tbody');
+        if (!tb) return;
+        tb.innerHTML = (Array.isArray(rows) ? rows : []).map(m => `
+            <tr>
+                <td>${m.id}</td><td>${m.titolo || ''}</td><td>${m.professore_nome || ''}</td><td>${m.scuola || ''}</td><td>${m.quando || ''}</td>
+                <td>
+                    <button class="btn btn-primary btn-sm" onclick="window.location.href='/api/materiali/${m.id}/file'">Scarica</button>
+                    <button class="btn btn-danger btn-sm" onclick="eliminaMateriale(${m.id})">Elimina</button>
+                </td>
+            </tr>`).join('');
+    }
+    async function uploadMateriale() {
+        const fd = new FormData();
+        fd.append('titolo', document.getElementById('matTitolo').value.trim());
+        fd.append('professore_nome', document.getElementById('matProf').value.trim());
+        fd.append('materia', document.getElementById('matMateria').value.trim());
+        fd.append('scuola', document.getElementById('matScuola').value.trim());
+        const f = document.getElementById('matFile').files[0];
+        if (!f) return alert('Seleziona un file');
+        fd.append('file', f);
+        const r = await fetch('/api/materiali', { method:'POST', body: fd });
+        const j = await r.json().catch(()=>({}));
+        if (!r.ok) return alert('❌ ' + (j.error || 'Errore upload'));
+        mostraToast('✅ Materiale caricato');
+        document.getElementById('formMaterialeUpload').reset();
+        caricaMateriali();
+    }
+    async function eliminaMateriale(mid) {
+        if (!confirm('Eliminare materiale?')) return;
+        const r = await fetch(`/api/materiali/${mid}`, { method:'DELETE' });
+        const j = await r.json().catch(()=>({}));
+        if (!r.ok) return alert('❌ ' + (j.error || 'Errore eliminazione'));
+        caricaMateriali();
+    }
+
+    async function caricaEventiEsame() {
+        const r = await fetch('/api/eventi-esame?t=' + Date.now());
+        const rows = await r.json().catch(()=>[]);
+        const tb = document.querySelector('#tabellaEventi tbody');
+        if (!tb) return;
+        tb.innerHTML = (Array.isArray(rows) ? rows : []).map(e => `
+            <tr>
+                <td>${e.id}</td><td>${e.titolo || ''}</td><td>${e.materia || ''}</td><td>${e.scuola || ''}</td><td>${e.quando || ''}</td><td>${e.group_id || '-'}</td>
+                <td><button class="btn btn-danger btn-sm" onclick="eliminaEventoEsame(${e.id})">Elimina</button></td>
+            </tr>`).join('');
+    }
+    async function creaEventoEsame() {
+        const titolo = document.getElementById('evTitolo').value.trim();
+        const materia = document.getElementById('evMateria').value.trim();
+        const scuola = document.getElementById('evScuola').value.trim();
+        const note = document.getElementById('evNote').value.trim();
+        const quando = document.getElementById('evQuando').value;
+        const groupRaw = document.getElementById('evGroupId').value.trim();
+        const body = { titolo, materia, scuola, note, quando };
+        if (groupRaw) body.group_id = parseInt(groupRaw, 10);
+        const r = await fetch('/api/eventi-esame', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) });
+        const j = await r.json().catch(()=>({}));
+        if (!r.ok) return alert('❌ ' + (j.error || 'Errore creazione evento'));
+        mostraToast('✅ Evento creato');
+        caricaEventiEsame();
+    }
+    async function eliminaEventoEsame(eid) {
+        if (!confirm('Eliminare evento?')) return;
+        const r = await fetch(`/api/eventi-esame/${eid}`, { method:'DELETE' });
+        const j = await r.json().catch(()=>({}));
+        if (!r.ok) return alert('❌ ' + (j.error || 'Errore eliminazione'));
+        caricaEventiEsame();
+    }
+
+    // ================= CARICAMENTO DATI =================
+    async function caricaVoti() {
+        try {
+            const response = await fetch(`/api/voti?t=${Date.now()}`);
+            const voti = await response.json();
+            const tabella = document.querySelector("#tabellaVoti tbody");
+            tabella.innerHTML = "";
+            voti.forEach((v) => {
+                const vid = v.id;
+                const riga = tabella.insertRow();
+                riga.insertCell(0).textContent = v.nomeProf || v.nome_professore || "";
+                riga.insertCell(1).textContent = v.materia || "";
+                riga.insertCell(2).textContent = v.scuola || "";
+                riga.insertCell(3).textContent = v.voto || "-";
+                let azioni = riga.insertCell(4);
+                let html = '';
+                if (v.user === USERNAME_CORRENTE) {
+                    html += `<button onclick="modificaVoto(${vid})">✏️ Modifica</button><button onclick="eliminaVoto(${vid})">🗑️ Elimina</button>`;
+                }
+                if (v.user !== USERNAME_CORRENTE) {
+                    html += `<button class="btn-segnala" onclick="apriSegnalazione('voto', ${vid})">🚩 Segnala</button>`;
+                }
+                azioni.innerHTML = html || "-";
+            });
+        } catch(e) { console.error("Errore caricaVoti:", e); }
+    }
+
+    // ✅ RECENSIONI CON LIKE, COMMENTI E SCUOLA
+    async function caricaRecensioni() {
+        try {
+            const response = await fetch(`/api/recensioni?t=${Date.now()}`);
+            const recensioni = await response.json();
+            const lista = document.getElementById('listaRecensioni');
+            lista.innerHTML = '';
+            
+            recensioni.forEach((r) => {
+                const rid = r.id;
+                const card = document.createElement('div');
+                card.className = 'recensione-card';
+                
+                const userRole = r.user_role || 'user';
+                const roleBadge = userRole === 'admin' ? 
+                    '<span class="recensione-badge admin">👑 Admin</span>' : 
+                    '<span class="recensione-badge user">👤 Utente</span>';
+                
+                const likes = r.likes || 0;
+                const dislikes = r.dislikes || 0;
+                const userLikes = r.user_likes || [];
+                const userDislikes = r.user_dislikes || [];
+                
+                card.innerHTML = `
+                    <div class="recensione-header">
+                        <div class="recensione-autore">
+                            <strong>${r.user || 'Anonimo'}</strong>
+                            ${r._anon ? '<span class="recensione-badge user" style="margin-left:8px;">Maschera pubblica</span>' : ''}
+                            ${roleBadge}
+                        </div>
+                        <div class="recensione-azioni">
+                            <button class="btn-like ${userLikes.includes(USERNAME_CORRENTE) ? 'active' : ''}" onclick="mettiLikeRecensione(${rid}, 'like')">
+                                👍 ${likes}
+                            </button>
+                            <button class="btn-dislike ${userDislikes.includes(USERNAME_CORRENTE) ? 'active' : ''}" onclick="mettiLikeRecensione(${rid}, 'dislike')">
+                                👎 ${dislikes}
+                            </button>
+                            <button class="btn-comment" onclick="toggleCommenti(${rid})">
+                                💬 Commenti
+                            </button>
+                            ${r.is_mine ? `
+                                <button class="btn btn-warning btn-sm" onclick="modificaRecensione(${rid})">✏️</button>
+                                <button class="btn btn-danger btn-sm" onclick="eliminaRecensione(${rid})">🗑️</button>
+                            ` : `
+                                <button class="btn-segnala btn-sm" onclick="apriSegnalazione('recensione', ${rid})">🚩</button>
+                            `}
+                        </div>
+                    </div>
+                    <div style="margin-bottom: 15px;">
+                        <strong style="color: #667eea;">👨‍🏫 ${r.nomeProfRec || r.nome_professore || 'N/A'}</strong>
+                        ${r.scuola ? `<span style="color: #999; margin-left: 10px;">🏫 ${r.scuola}</span>` : ''}
+                    </div>
+                    <p style="color: #333; line-height: 1.7; margin-bottom: 15px;">${r.recensione || r.testo || ''}</p>
+                    <div id="commentiSection${rid}" class="commenti-section" style="display: none;">
+                        <h4 style="margin-bottom: 15px; color: #333;">💬 Commenti</h4>
+                        <input type="hidden" id="replyParent${rid}" value="">
+                        <div id="listaCommenti${rid}"></div>
+                        <div class="nuovo-commento-form">
+                            <textarea id="nuovoCommento${rid}" placeholder="Scrivi un commento o una risposta..."></textarea>
+                            <small id="replyLabel${rid}" style="display:none;color:#667eea;"></small><br>
+                            <button type="button" class="btn btn-secondary btn-sm" onclick="clearReplyTarget(${rid})" id="replyCancel${rid}" style="display:none;">Annulla risposta</button>
+                            <button class="btn btn-success btn-sm" onclick="aggiungiCommento(${rid})">Invia</button>
+                        </div>
+                    </div>
+                `;
+                
+                lista.appendChild(card);
+                
+                // Carica commenti se presenti
+                if(r.commenti && r.commenti.length > 0) {
+                    caricaCommenti(rid, r.commenti);
+                }
+            });
+        } catch(e) { console.error("Errore caricaRecensioni:", e); }
+    }
+
+    function renderCommentBranch(recIndex, c, fallbackIndex) {
+        const cid = (c.id !== undefined && c.id !== null) ? c.id : fallbackIndex;
+        const roleBadge = c.ruolo === 'admin' ? 
+            '<span class="commento-badge admin">👑 Admin</span>' : 
+            '<span class="commento-badge user">👤 Utente</span>';
+        const adminClass = c.ruolo === 'admin' ? 'admin' : '';
+        const userLikes = c.user_likes || [];
+        const userDislikes = c.user_dislikes || [];
+        const subs = Array.isArray(c.replies) ? c.replies : [];
+        let inner = '';
+        subs.forEach((child, ix) => { inner += renderCommentBranch(recIndex, child, ix); });
+        return `
+            <div class="commento-item ${adminClass}" style="margin-left:${c.parent_id ? '12px' : '0'}; border-left:${c.parent_id ? '2px solid #e0e0e0' : 'none'}; padding-left:8px;">
+                <div class="commento-header">
+                    <div class="commento-autore">
+                        ${c.utente}
+                        ${roleBadge}
+                    </div>
+                    <span class="commento-data">${c.data || ''}</span>
+                </div>
+                <div class="commento-testo">${c.testo || ''}</div>
+                <div class="commento-azioni">
+                    <button type="button" class="btn-comment-like ${userLikes.includes(USERNAME_CORRENTE) ? 'active' : ''}" onclick="mettiLikeCommento(${recIndex}, ${cid}, 'like')">
+                        👍 ${c.likes || 0}
+                    </button>
+                    <button type="button" class="btn-comment-dislike ${userDislikes.includes(USERNAME_CORRENTE) ? 'active' : ''}" onclick="mettiLikeCommento(${recIndex}, ${cid}, 'dislike')">
+                        👎 ${c.dislikes || 0}
+                    </button>
+                    <button type="button" class="btn btn-secondary btn-sm" onclick="rispondiCommento(${recIndex}, ${cid})">↩️ Rispondi</button>
+                </div>
+                ${inner ? `<div class="comment-replies" style="margin-top:10px;">${inner}</div>` : ''}
+            </div>`;
+    }
+
+    function caricaCommenti(recIndex, commenti) {
+        const lista = document.getElementById(`listaCommenti${recIndex}`);
+        if(!lista) return;
+        if(!commenti || commenti.length === 0) {
+            lista.innerHTML = '<div class="nessun-commento">Nessun commento ancora</div>';
+            return;
+        }
+        lista.innerHTML = commenti.map((c, ix) => renderCommentBranch(recIndex, c, ix)).join('');
+    }
+
+    function rispondiCommento(recId, commentId) {
+        const hid = document.getElementById(`replyParent${recId}`);
+        const lab = document.getElementById(`replyLabel${recId}`);
+        const can = document.getElementById(`replyCancel${recId}`);
+        if (!hid || !lab) return;
+        hid.value = String(commentId);
+        lab.style.display = 'inline';
+        lab.textContent = 'Risposta al commento #' + commentId;
+        if (can) can.style.display = 'inline';
+        document.getElementById(`nuovoCommento${recId}`)?.focus();
+    }
+
+    function clearReplyTarget(recId) {
+        const hid = document.getElementById(`replyParent${recId}`);
+        const lab = document.getElementById(`replyLabel${recId}`);
+        const can = document.getElementById(`replyCancel${recId}`);
+        if (hid) hid.value = '';
+        if (lab) { lab.style.display = 'none'; lab.textContent = ''; }
+        if (can) can.style.display = 'none';
+    }
+
+    function toggleCommenti(recIndex) {
+        const section = document.getElementById(`commentiSection${recIndex}`);
+        if(section.style.display === 'none') {
+            section.style.display = 'block';
+            caricaCommentiAPI(recIndex);
+        } else {
+            section.style.display = 'none';
+        }
+    }
+
+    async function caricaCommentiAPI(recIndex) {
+        try {
+            const response = await fetch(`/api/recensioni/${recIndex}/commenti`);
+            const commenti = await response.json();
+            caricaCommenti(recIndex, commenti);
+        } catch(e) { console.error("Errore caricaCommentiAPI:", e); }
+    }
+
+    async function aggiungiCommento(recIndex) {
+        const testo = document.getElementById(`nuovoCommento${recIndex}`).value.trim();
+        if(!testo) { alert('⚠️ Scrivi un commento!'); return; }
+        const pv = document.getElementById(`replyParent${recIndex}`)?.value;
+        let parent_id = null;
+        if (pv) { parent_id = parseInt(pv, 10); if (Number.isNaN(parent_id)) parent_id = null; }
+        
+        try {
+            const response = await fetch(`/api/recensioni/${recIndex}/commenti`, {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({ testo, parent_id })
+            });
+            const data = await response.json().catch(()=>({}));
+            if(response.ok && data.success) {
+                document.getElementById(`nuovoCommento${recIndex}`).value = '';
+                clearReplyTarget(recIndex);
+                caricaCommentiAPI(recIndex);
+                caricaRecensioni();
+                mostraToast('✅ Commento aggiunto');
+            } else {
+                alert('❌ ' + (data.error || ('HTTP ' + response.status)));
+            }
+        } catch(e) { console.error("Errore aggiungiCommento:", e); alert('❌ Errore di connessione'); }
+    }
+
+    async function mettiLikeRecensione(recIndex, azione) {
+        try {
+            const response = await fetch(`/api/recensioni/${recIndex}/like`, {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({ azione })
+            });
+            const data = await response.json();
+            if(data.success) {
+                caricaRecensioni();
+            }
+        } catch(e) { console.error("Errore mettiLikeRecensione:", e); }
+    }
+
+    async function mettiLikeCommento(recIndex, commIndex, azione) {
+        try {
+            const response = await fetch(`/api/recensioni/${recIndex}/commenti/${commIndex}/like`, {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({ azione })
+            });
+            const data = await response.json();
+            if(data.success) {
+                caricaCommentiAPI(recIndex);
+            }
+        } catch(e) { console.error("Errore mettiLikeCommento:", e); }
+    }
+
+    async function caricaProfessori() {
+        try {
+            const response = await fetch(`/api/professori?t=${Date.now()}`);
+            listaProfessori = await response.json();
+            if(document.getElementById('suggerimentiProf').style.display === 'block') mostraSuggerimenti();
+            if(document.getElementById('suggerimentiProfRec').style.display === 'block') mostraSuggerimentiRec();
+            if(document.getElementById('suggerimentiScuolaRec').style.display === 'block') mostraSuggerimentiScuola();
+        } catch(e) { console.error("Errore caricaProfessori:", e); }
+    }
+
+    // ================= PROFILO =================
+    async function caricaProfilo() {
+        try {
+            const response = await fetch(`/api/profilo?t=${Date.now()}`);
+            const profilo = await response.json();
+            if(profilo.email) document.getElementById('profiloEmail').value = profilo.email;
+            if(profilo.nome_cognome) document.getElementById('profiloNome').value = profilo.nome_cognome;
+            if(profilo.scuola) document.getElementById('profiloScuola').value = profilo.scuola;
+            document.getElementById('profiloPassword').value = '';
+            document.getElementById('profiloTel').value = profilo.telefono || '';
+            document.getElementById('profiloIndirizzo').value = profilo.indirizzo || '';
+            document.getElementById('profiloCitta').value = profilo.citta || '';
+            document.getElementById('profiloCap').value = profilo.cap || '';
+            document.getElementById('profiloNascita').value = profilo.data_nascita || '';
+        } catch(e) { console.error("Errore caricaProfilo:", e); }
+    }
+
+    async function caricaAccessLog() {
+        const box = document.getElementById('accessLogBox');
+        box.style.display = 'block';
+        box.textContent = 'Caricamento...';
+        try {
+            const r = await fetch('/api/me/access-log?limit=30');
+            const rows = await r.json();
+            if (!r.ok || !Array.isArray(rows)) { box.textContent = 'Errore caricamento log.'; return; }
+            box.textContent = rows.map(x => `${x.quando || ''}\t${x.ip || '-'}\t${(x.user_agent||'').slice(0,120)}`).join('\n');
+        } catch (_) { box.textContent = 'Errore caricamento.'; }
+    }
+
+    async function richiediCancellazioneAccount() {
+        const motivo = prompt("Inserisci il motivo della richiesta cancellazione account (opzionale):") || "";
+        if (!confirm("Confermi l'invio della richiesta GDPR di cancellazione account?")) return;
+        try {
+            const r = await fetch('/api/privacy/delete-request', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({ motivo })
+            });
+            const j = await r.json().catch(()=>({}));
+            if (!r.ok) return mostraToast('❌ ' + (j.error || 'Errore richiesta'), 'error');
+            mostraToast('✅ Richiesta inviata agli admin');
+        } catch (e) { mostraToast('❌ Errore di connessione', 'error'); }
+    }
+
+    async function salvaProfilo() {
+        const email = document.getElementById('profiloEmail').value.trim();
+        const nome_cognome = document.getElementById('profiloNome').value.trim();
+        const scuola = document.getElementById('profiloScuola').value.trim();
+        const telefono = document.getElementById('profiloTel').value.trim();
+        const indirizzo = document.getElementById('profiloIndirizzo').value.trim();
+        const citta = document.getElementById('profiloCitta').value.trim();
+        const cap = document.getElementById('profiloCap').value.trim();
+        const data_nascita = document.getElementById('profiloNascita').value.trim();
+        const password = document.getElementById('profiloPassword').value;
+        
+        if(password && password.length < 4) { mostraToast('⚠️ Password minima 4 caratteri!', 'error'); return; }
+        
+        try {
+            const response = await fetch('/api/profilo', {
+                method: 'PUT',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({ email, nome_cognome, scuola, telefono, indirizzo, citta, cap, data_nascita, password: password || undefined })
+            });
+            const data = await response.json();
+            if(data.success) {
+                mostraToast('✅ Profilo aggiornato!');
+                document.getElementById('profiloPassword').value = '';
+                setTimeout(() => toggleProfilo(), 1500);
+            } else {
+                mostraToast('❌ ' + (data.error || 'Errore'), 'error');
+            }
+        } catch(e) { console.error("Errore salvaProfilo:", e); mostraToast('❌ Errore di connessione', 'error'); }
+    }
+
+    // ================= STORICO VOTI =================
+    async function caricaStoricoVoti() {
+        try {
+            const response = await fetch(`/api/storico-voti?t=${Date.now()}`);
+            const voti = await response.json();
+            const tbody = document.querySelector("#tabellaStoricoVoti tbody");
+            tbody.innerHTML = "";
+            
+            const totale = voti.length;
+            const media = totale > 0 ? (voti.reduce((sum, v) => sum + (parseInt(v.voto) || 0), 0) / totale).toFixed(2) : '-';
+            const materie = {};
+            voti.forEach(v => {
+                const m = v.materia || 'Altro';
+                materie[m] = (materie[m] || 0) + 1;
+            });
+            const materiaPreferita = Object.keys(materie).length > 0 
+                ? Object.keys(materie).reduce((a, b) => materie[a] > materie[b] ? a : b) 
+                : '-';
+            
+            document.getElementById('statTotaleVoti').textContent = totale;
+            document.getElementById('statMediaVoti').textContent = media;
+            document.getElementById('statMateriaPreferita').textContent = materiaPreferita;
+            
+            voti.forEach((v, i) => {
+                const riga = tbody.insertRow();
+                riga.insertCell(0).textContent = v.nomeProf || v.nome_professore || '-';
+                riga.insertCell(1).textContent = v.materia || '-';
+                riga.insertCell(2).textContent = v.scuola || '-';
+                riga.insertCell(3).innerHTML = `<strong style="color: ${v.voto >= 6 ? '#4CAF50' : '#f44336'}">${v.voto || '-'}</strong>`;
+                riga.insertCell(4).textContent = v.timestamp || '-';
+                const azioni = riga.insertCell(5);
+                azioni.innerHTML = `
+                    <button class="btn btn-warning btn-sm" onclick="modificaVotoDaStorico(${i})">✏️</button>
+                    <button class="btn btn-danger btn-sm" onclick="eliminaVotoDaStorico(${i})">🗑️</button>
+                `;
+            });
+        } catch(e) { console.error("Errore caricaStoricoVoti:", e); }
+    }
+
+    async function modificaVotoDaStorico(index) {
+        const response = await fetch(`/api/storico-voti?t=${Date.now()}`);
+        const voti = await response.json();
+        const v = voti[index];
+        if(!v || v.id === undefined) { mostraToast('❌ Voto non trovato', 'error'); return; }
+        document.getElementById("nomeProf").value = v.nomeProf || v.nome_professore || "";
+        document.getElementById("materia").value = v.materia || "";
+        document.getElementById("voto").value = v.voto || "";
+        editingVoto = v.id;
+        const btn = document.querySelector('.input-section button:first-child');
+        btn.textContent = "💾 Salva modifica";
+        btn.onclick = salvaModificaVoto;
+        toggleStorico();
+        mostraToast('✏️ Modifica voto pronta');
+    }
+
+    async function eliminaVotoDaStorico(index) {
+        if(!confirm("⚠️ Eliminare questo voto dallo storico?")) return;
+        const response = await fetch(`/api/storico-voti?t=${Date.now()}`);
+        const voti = await response.json();
+        const v = voti[index];
+        if(!v || v.id === undefined) return;
+        await fetch(`/api/voti/${v.id}?t=${Date.now()}`, { method: "DELETE" });
+        caricaStoricoVoti();
+        caricaVoti();
+        mostraToast('✅ Voto eliminato');
+    }
+
+    // ================= TICKET =================
+    async function caricaTicket() {
+        try {
+            const response = await fetch(`/api/ticket?t=${Date.now()}`);
+            const ticket = await response.json();
+            const tbody = document.querySelector("#tabellaTicket tbody");
+            tbody.innerHTML = '';
+            
+            const totale = ticket.length;
+            const aperti = ticket.filter(t => t.stato === 'aperto').length;
+            const risolti = ticket.filter(t => t.stato === 'risolto').length;
+            
+            document.getElementById('statTicketTotali').textContent = totale;
+            document.getElementById('statTicketAperti').textContent = aperti;
+            document.getElementById('statTicketRisolti').textContent = risolti;
+            
+            ticket.forEach(t => {
+                const riga = tbody.insertRow();
+                const prioritaClass = `priorita-${t.priorita}`;
+                const statoClass = `stato-${t.stato}`;
+                const statoLabel = t.stato === 'aperto' ? '🔵 Aperto' : 
+                                  t.stato === 'in_lavorazione' ? '🟡 In lavorazione' :
+                                  t.stato === 'risolto' ? '🟢 Risolto' : '⚫ Chiuso';
+                
+                riga.innerHTML = `
+                    <td>#${t.id}</td>
+                    <td><strong>${t.oggetto}</strong></td>
+                    <td><span class="${prioritaClass}">${t.priorita}</span></td>
+                    <td><span class="${statoClass}">${statoLabel}</span></td>
+                    <td>${t.data_apertura}</td>
+                    <td>
+                        <button class="btn btn-primary btn-sm" onclick="vediDettaglioTicket(${t.id})">👁️ Vedi</button>
+                        ${t.stato === 'aperto' ? `<button class="btn btn-danger btn-sm" onclick="eliminaTicket(${t.id})">🗑️</button>` : ''}
+                    </td>
+                `;
+            });
+        } catch(e) { console.error("Errore caricaTicket:", e); }
+    }
+
+    function apriNuovoTicket() {
+        document.getElementById('ticketOggetto').value = '';
+        document.getElementById('ticketMessaggio').value = '';
+        document.getElementById('ticketPriorita').value = 'media';
+        document.getElementById('modalNuovoTicket').classList.add('active');
+    }
+
+    function chiudiNuovoTicket() {
+        document.getElementById('modalNuovoTicket').classList.remove('active');
+    }
+
+    async function creaTicket() {
+        const oggetto = document.getElementById('ticketOggetto').value.trim();
+        const messaggio = document.getElementById('ticketMessaggio').value.trim();
+        const priorita = document.getElementById('ticketPriorita').value;
+        
+        if(!oggetto || !messaggio) { alert('⚠️ Compila oggetto e messaggio!'); return; }
+        
+        try {
+            const response = await fetch('/api/ticket', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({ oggetto, messaggio, priorita })
+            });
+            const data = await response.json();
+            if(data.success) {
+                chiudiNuovoTicket();
+                caricaTicket();
+                alert('✅ Ticket creato! ID: #' + data.ticket_id);
+            } else {
+                alert('❌ ' + (data.error || 'Errore'));
+            }
+        } catch(e) { console.error("Errore creaTicket:", e); alert('❌ Errore di connessione'); }
+    }
+
+    async function vediDettaglioTicket(id) {
+        ticketCorrenteId = id;
+        try {
+            const response = await fetch(`/api/ticket/${id}?t=${Date.now()}`);
+            const ticket = await response.json();
+            
+            const prioritaClass = `priorita-${ticket.priorita}`;
+            const statoLabel = ticket.stato === 'aperto' ? '🔵 Aperto' : 
+                              ticket.stato === 'in_lavorazione' ? '🟡 In lavorazione' :
+                              ticket.stato === 'risolto' ? '🟢 Risolto' : '⚫ Chiuso';
+            
+            document.getElementById('dettaglioTicketOggetto').textContent = `🎫 Ticket #${ticket.id}: ${ticket.oggetto}`;
+            document.getElementById('dettaglioTicketInfo').innerHTML = `
+                <p><strong>Utente:</strong> ${ticket.utente}</p>
+                <p><strong>Priorità:</strong> <span class="${prioritaClass}">${ticket.priorita}</span></p>
+                <p><strong>Stato:</strong> ${statoLabel}</p>
+                <p><strong>Data:</strong> ${ticket.data_apertura}</p>
+                <p><strong>Messaggio:</strong> ${ticket.messaggio}</p>
+                ${ticket.admin_assegnato ? `<p><strong>Admin:</strong> ${ticket.admin_assegnato}</p>` : ''}
+            `;
+            
+            const risposteDiv = document.getElementById('dettaglioTicketRisposte');
+            if(ticket.risposte && ticket.risposte.length > 0) {
+                risposteDiv.innerHTML = '<h4 style="margin-bottom: 15px; color: #333;">💬 Conversazione</h4>' + ticket.risposte.map(r => `
+                    <div class="risposta-item ${r.da === 'admin' ? 'admin' : ''}">
+                        <div class="risposta-header">
+                            <strong>${r.da === 'admin' ? '👨‍💼 Admin (' + r.admin + ')' : '👤 Tu'}</strong>
+                            <span>${r.data}</span>
+                        </div>
+                        <div class="risposta-messaggio">${r.messaggio}</div>
+                    </div>
+                `).join('');
+            } else {
+                risposteDiv.innerHTML = '<p style="color:#999; text-align: center; padding: 20px;">Nessuna risposta ancora.</p>';
+            }
+            
+            document.getElementById('ticketRisposta').value = '';
+            document.getElementById('modalDettaglioTicket').classList.add('active');
+        } catch(e) { console.error("Errore vediDettaglioTicket:", e); }
+    }
+
+    function chiudiDettaglioTicket() {
+        document.getElementById('modalDettaglioTicket').classList.remove('active');
+        ticketCorrenteId = null;
+    }
+
+    async function inviaRispostaTicket() {
+        const messaggio = document.getElementById('ticketRisposta').value.trim();
+        if(!messaggio) { alert('⚠️ Scrivi una risposta!'); return; }
+        
+        try {
+            const response = await fetch(`/api/ticket/${ticketCorrenteId}`, {
+                method: 'PUT',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({ messaggio })
+            });
+            const data = await response.json();
+            if(data.success) {
+                vediDettaglioTicket(ticketCorrenteId);
+                alert('✅ Risposta inviata!');
+            } else {
+                alert('❌ ' + (data.error || 'Errore'));
+            }
+        } catch(e) { console.error("Errore inviaRispostaTicket:", e); alert('❌ Errore di connessione'); }
+    }
+
+    async function eliminaTicket(id) {
+        if(!confirm('⚠️ Eliminare questo ticket?')) return;
+        try {
+            const response = await fetch(`/api/ticket/${id}`, {method: 'DELETE'});
+            const data = await response.json();
+            if(data.success) {
+                caricaTicket();
+                alert('✅ Ticket eliminato');
+            } else {
+                alert('❌ ' + (data.error || 'Errore'));
+            }
+        } catch(e) { console.error("Errore eliminaTicket:", e); alert('❌ Errore di connessione'); }
+    }
+
+    // ================= AUTO-SYNC =================
+    function avviaAutoSync() {
+        setInterval(() => {
+            caricaVoti();
+            caricaRecensioni();
+            caricaProfessori();
+            caricaNotifiche();
+            mostraToast('🔄 Aggiornato');
+        }, SYNC_INTERVAL);
+    }
+
+    // ================= VOTI =================
+    async function aggiungiVoto() {
+        let nomeProf = document.getElementById("nomeProf").value.trim();
+        let materia = document.getElementById("materia").value.trim();
+        let voto = document.getElementById("voto").value.trim();
+        if (!nomeProf || !materia || !voto) { alert("⚠️ Compila tutti i campi!"); return; }
+        if (voto < 1 || voto > 10) { alert("⚠️ Il voto deve essere tra 1 e 10!"); return; }
+        try {
+            await fetch("/api/voti", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ nomeProf, materia, voto }) });
+            annullaInput(); caricaVoti(); mostraToast('✅ Voto aggiunto');
+        } catch(e) { alert("❌ Errore di connessione"); }
+    }
+
+    async function eliminaVoto(dbId) {
+        if(!confirm("⚠️ Eliminare questo voto?")) return;
+        try { await fetch(`/api/voti/${dbId}?t=${Date.now()}`, { method: "DELETE" }); caricaVoti(); mostraToast('✅ Voto eliminato'); } catch(e) { alert("❌ Errore"); }
+    }
+
+    async function modificaVoto(dbId) {
+        const response = await fetch(`/api/voti?t=${Date.now()}`);
+        const voti = await response.json();
+        const v = voti.find(x => x.id === dbId);
+        if(!v) { alert("❌ Voto non trovato"); return; }
+        document.getElementById("nomeProf").value = v.nomeProf || v.nome_professore || "";
+        document.getElementById("materia").value = v.materia || "";
+        document.getElementById("voto").value = v.voto || "";
+        editingVoto = dbId;
+        const btn = document.querySelector('.input-section button:first-child');
+        btn.textContent = "💾 Salva modifica";
+        btn.onclick = salvaModificaVoto;
+    }
+
+    async function salvaModificaVoto() {
+        let nomeProf = document.getElementById("nomeProf").value.trim();
+        let materia = document.getElementById("materia").value.trim();
+        let voto = document.getElementById("voto").value.trim();
+        if (voto < 1 || voto > 10) { alert("⚠️ Il voto deve essere tra 1 e 10!"); return; }
+        try {
+            await fetch(`/api/voti/${editingVoto}`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ nomeProf, materia, voto }) });
+            editingVoto = null; annullaInput(); caricaVoti(); mostraToast('✅ Voto aggiornato');
+            const btn = document.querySelector('.input-section button:first-child');
+            btn.textContent = "➕ Aggiungi"; btn.onclick = aggiungiVoto;
+        } catch(e) { alert("❌ Errore"); }
+    }
+
+    function annullaInput() {
+        document.getElementById("nomeProf").value = "";
+        document.getElementById("materia").value = "";
+        document.getElementById("voto").value = "";
+        editingVoto = null;
+        const btn = document.querySelector('.input-section button:first-child');
+        btn.textContent = "➕ Aggiungi"; btn.onclick = aggiungiVoto;
+    }
+
+    function validareVoto() {
+        const voto = document.getElementById("voto").value;
+        const input = document.getElementById("voto");
+        if(voto && (voto < 1 || voto > 10)) { input.style.borderColor = "#f44336"; } else { input.style.borderColor = "#e0e0e0"; }
+    }
+
+    function filtroVoti() {
+        const input = document.getElementById("searchVoti").value.toLowerCase();
+        document.querySelectorAll("#tabellaVoti tbody tr").forEach(row => {
+            row.style.display = row.textContent.toLowerCase().includes(input) ? "" : "none";
+        });
+    }
+
+    // ================= RECENSIONI =================
+    async function aggiungiRecensione() {
+        let nomeProfRec = document.getElementById("nomeProfRec").value.trim();
+        let scuolaRec = document.getElementById("scuolaRec").value.trim();
+        let recensione = document.getElementById("recensione").value.trim();
+        if (!nomeProfRec || !recensione) { alert("⚠️ Compila professore e recensione!"); return; }
+        const anon = !!document.getElementById("recensioneAnonima")?.checked;
+        const pidRaw = document.getElementById("profRecProfessorId")?.value;
+        let professor_id = pidRaw ? parseInt(pidRaw, 10) : null;
+        if (Number.isNaN(professor_id)) professor_id = null;
+        try {
+            const response = await fetch("/api/recensioni", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ nomeProfRec, scuola: scuolaRec, recensione, is_anonymous: anon, professor_id })
+            });
+            const data = await response.json().catch(()=>({}));
+            if (response.ok && data.success !== false) {
+                annullaRecensione(); caricaRecensioni(); mostraToast('✅ Recensione aggiunta');
+            } else {
+                alert('❌ ' + (data.error || ('Errore ' + response.status)));
+            }
+        } catch(e) { alert("❌ Errore di connessione"); }
+    }
+
+    async function eliminaRecensione(recId) {
+        if(!confirm("⚠️ Eliminare questa recensione?")) return;
+        try { await fetch(`/api/recensioni/${recId}?t=${Date.now()}`, { method: "DELETE" }); caricaRecensioni(); mostraToast('✅ Recensione eliminata'); } catch(e) { alert("❌ Errore"); }
+    }
+
+    async function modificaRecensione(recId) {
+        const response = await fetch(`/api/recensioni?t=${Date.now()}`);
+        const recensioni = await response.json();
+        const r = recensioni.find(x => x.id === recId);
+        if(!r) { alert("❌ Recensione non trovata"); return; }
+        document.getElementById("nomeProfRec").value = r.nomeProfRec || r.nome_professore || "";
+        document.getElementById("scuolaRec").value = r.scuola || "";
+        document.getElementById("recensione").value = r.recensione || r.testo || "";
+        const hid = document.getElementById("profRecProfessorId"); if (hid) hid.value = r.professor_id != null ? String(r.professor_id) : '';
+        const ac = document.getElementById("recensioneAnonima"); if (ac) ac.checked = !!r.is_anonymous;
+        editingRecensione = recId;
+        const btn = document.querySelector('.input-section button:first-child');
+        btn.textContent = "💾 Salva modifica";
+        btn.onclick = salvaModificaRecensione;
+    }
+
+    async function salvaModificaRecensione() {
+        let nomeProfRec = document.getElementById("nomeProfRec").value.trim();
+        let scuolaRec = document.getElementById("scuolaRec").value.trim();
+        let recensione = document.getElementById("recensione").value.trim();
+        if (!recensione) { alert("⚠️ Recensione vuota!"); return; }
+        try {
+            const is_anonymous = !!document.getElementById("recensioneAnonima")?.checked;
+            const pidRaw = document.getElementById("profRecProfessorId")?.value;
+            let professor_id = pidRaw ? parseInt(pidRaw, 10) : null;
+            if (Number.isNaN(professor_id)) professor_id = null;
+            await fetch(`/api/recensioni/${editingRecensione}`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ nomeProfRec, scuola: scuolaRec, recensione, is_anonymous, professor_id }) });
+            editingRecensione = null; annullaRecensione(); caricaRecensioni(); mostraToast('✅ Recensione aggiornata');
+            const btn = document.querySelector('.input-section button:first-child');
+            btn.textContent = "➕ Aggiungi Recensione"; btn.onclick = aggiungiRecensione;
+        } catch(e) { alert("❌ Errore"); }
+    }
+
+    function annullaRecensione() {
+        document.getElementById("nomeProfRec").value = "";
+        document.getElementById("scuolaRec").value = "";
+        document.getElementById("recensione").value = "";
+        const h = document.getElementById("profRecProfessorId"); if (h) h.value = '';
+        const a = document.getElementById("recensioneAnonima"); if (a) a.checked = false;
+        editingRecensione = null;
+        const btn = document.querySelector('.input-section button:first-child');
+        btn.textContent = "➕ Aggiungi Recensione"; btn.onclick = aggiungiRecensione;
+    }
+
+    // ================= PROFESSORI =================
+    function apriFormProf() {
+        const modal = document.getElementById("modalProf");
+        if(modal) { modal.style.display = "flex"; document.getElementById("formNomeProf").value = ""; document.getElementById("formMateriaProf").value = ""; document.getElementById("formScuolaProf").value = ""; }
+    }
+
+    function chiudiFormProf() { const modal = document.getElementById("modalProf"); if(modal) modal.style.display = "none"; }
+
+    async function salvaProfessore() {
+        let nome = document.getElementById("formNomeProf").value.trim();
+        let materia = document.getElementById("formMateriaProf").value.trim();
+        let scuola = document.getElementById("formScuolaProf").value.trim();
+        if (!nome || !materia || !scuola) { alert("⚠️ Compila tutti i campi!"); return; }
+        try {
+            const response = await fetch("/api/professori", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ nome, materia, scuola }) });
+            const data = await response.json();
+            if (data.success) { chiudiFormProf(); await caricaProfessori(); alert("✅ Professore aggiunto!"); }
+            else { alert("❌ Errore: " + (data.error || "Operazione fallita")); }
+        } catch(err) { alert("❌ Errore di connessione"); }
+    }
+
+    document.addEventListener('click', (e) => { const modal = document.getElementById("modalProf"); if(modal && e.target === modal) chiudiFormProf(); });
+
+    // ================= AUTOCOMPLETE =================
+    function mostraSuggerimenti() {
+        const input = document.getElementById("nomeProf");
+        const box = document.getElementById("suggerimentiProf");
+        const inputValue = input.value.toLowerCase();
+        
+        box.innerHTML = "";
+        if(inputValue.length < 2) { 
+            box.style.display = "none"; 
+            return; 
+        }
+        
+        const risultati = listaProfessori.filter(p => 
+            (p.nome?.toLowerCase() || "").includes(inputValue) || 
+            (p.materia?.toLowerCase() || "").includes(inputValue)
+        ).slice(0, 5);
+        
+        if(risultati.length === 0) { 
+            box.style.display = "none"; 
+            return; 
+        }
+        
+        risultati.forEach(prof => {
+            const item = document.createElement("div");
+            item.innerHTML = `
+                <strong>${prof.nome}</strong><br>
+                <small style="color: #666;">${prof.materia} - ${prof.scuola}</small>
+            `;
+            item.style.padding = "12px 18px";
+            item.style.cursor = "pointer";
+            item.style.borderBottom = "1px solid #f0f0f0";
+            item.onclick = () => { 
+                document.getElementById("nomeProf").value = prof.nome; 
+                document.getElementById("materia").value = prof.materia; 
+                box.style.display = "none"; 
+            };
+            box.appendChild(item);
+        });
+        box.style.display = "block";
+    }
+
+    function mostraSuggerimentiRec() {
+        const input = document.getElementById("nomeProfRec");
+        const box = document.getElementById("suggerimentiProfRec");
+        const inputValue = input.value.toLowerCase();
+        
+        box.innerHTML = "";
+        if(inputValue.length < 2) { 
+            box.style.display = "none"; 
+            return; 
+        }
+        
+        const risultati = listaProfessori.filter(p => 
+            (p.nome?.toLowerCase() || "").includes(inputValue)
+        ).slice(0, 5);
+        
+        if(risultati.length === 0) { 
+            box.style.display = "none"; 
+            return; 
+        }
+        
+        risultati.forEach(prof => {
+            const item = document.createElement("div");
+            item.innerHTML = `
+                <strong>${prof.nome}</strong><br>
+                <small style="color: #666;">${prof.materia} - ${prof.scuola}</small>
+            `;
+            item.style.padding = "12px 18px";
+            item.style.cursor = "pointer";
+            item.style.borderBottom = "1px solid #f0f0f0";
+            item.onclick = () => { 
+                document.getElementById("nomeProfRec").value = prof.nome; 
+                document.getElementById("scuolaRec").value = prof.scuola;
+                const hid = document.getElementById("profRecProfessorId"); if (hid) hid.value = prof.id != null ? String(prof.id) : '';
+                box.style.display = "none"; 
+            };
+            box.appendChild(item);
+        });
+        box.style.display = "block";
+    }
+
+    function mostraSuggerimentiScuola() {
+        const input = document.getElementById("scuolaRec");
+        const box = document.getElementById("suggerimentiScuolaRec");
+        const inputValue = input.value.toLowerCase();
+        
+        box.innerHTML = "";
+        if(inputValue.length < 2) { 
+            box.style.display = "none"; 
+            return; 
+        }
+        
+        // Estrai scuole uniche dalla lista professori
+        const scuoleUniche = [...new Set(listaProfessori.map(p => p.scuola).filter(s => s))];
+        const risultati = scuoleUniche.filter(s => s.toLowerCase().includes(inputValue)).slice(0, 5);
+        
+        if(risultati.length === 0) { 
+            box.style.display = "none"; 
+            return; 
+        }
+        
+        risultati.forEach(scuola => {
+            const item = document.createElement("div");
+            item.innerHTML = `<strong>🏫 ${scuola}</strong>`;
+            item.style.padding = "12px 18px";
+            item.style.cursor = "pointer";
+            item.style.borderBottom = "1px solid #f0f0f0";
+            item.onclick = () => { 
+                document.getElementById("scuolaRec").value = scuola; 
+                box.style.display = "none"; 
+            };
+            box.appendChild(item);
+        });
+        box.style.display = "block";
+    }
+
+    // Chiudi autocomplete quando clicco fuori
+    document.addEventListener('click', (e) => {
+        if(!e.target.closest('#nomeProf') && !e.target.closest('#suggerimentiProf')) { 
+            document.getElementById('suggerimentiProf').style.display = 'none'; 
+        }
+        if(!e.target.closest('#nomeProfRec') && !e.target.closest('#suggerimentiProfRec')) { 
+            document.getElementById('suggerimentiProfRec').style.display = 'none'; 
+        }
+        if(!e.target.closest('#scuolaRec') && !e.target.closest('#suggerimentiScuolaRec')) { 
+            document.getElementById('suggerimentiScuolaRec').style.display = 'none'; 
+        }
+    });
+
+    // ================= SEGNALAZIONI =================
+    function apriSegnalazione(tipo, indice) {
+        segnalazioneTipo = tipo;
+        segnalazioneIndice = indice;
+        document.getElementById('modalSegnalazione').style.display = 'flex';
+        document.getElementById('formMotivoSegnalazione').value = '';
+        document.getElementById('formNotaSegnalazione').value = '';
+    }
+
+    function chiudiSegnalazione() {
+        document.getElementById('modalSegnalazione').style.display = 'none';
+        segnalazioneTipo = null;
+        segnalazioneIndice = null;
+    }
+
+    async function inviaSegnalazione() {
+        const motivo = document.getElementById('formMotivoSegnalazione').value;
+        const nota = document.getElementById('formNotaSegnalazione').value.trim();
+        if(!motivo) { alert('⚠️ Seleziona un motivo!'); return; }
+        try {
+            const response = await fetch('/api/segnalazioni', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({ tipo: segnalazioneTipo, indice: segnalazioneIndice, motivo: motivo + (nota ? ': ' + nota : '') })
+            });
+            const data = await response.json();
+            if(data.success) { chiudiSegnalazione(); alert('✅ Segnalazione inviata! L\'admin la valuterà.'); }
+            else { alert('❌ Errore: ' + (data.error || 'Operazione fallita')); }
+        } catch(e) { alert('❌ Errore di connessione'); }
+    }
+
+    document.addEventListener('click', (e) => { const modal = document.getElementById('modalSegnalazione'); if(modal && e.target === modal) chiudiSegnalazione(); });
+
+    
+    // ================= INIZIALIZZAZIONE =================
+    document.addEventListener("DOMContentLoaded", () => {
+        const savedTheme = localStorage.getItem('theme') || 'light';
+        document.body.setAttribute('data-theme', savedTheme);
+        document.getElementById('themeToggle').textContent = savedTheme === 'dark' ? '🌞' : '🌙';
+        caricaVoti();
+        caricaRecensioni();
+        caricaProfessori();
+        caricaNotifiche();
+        avviaAutoSync();
+    });
+</script>
+</body>
+</html>

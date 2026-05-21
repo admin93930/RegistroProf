@@ -1,0 +1,190 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description" content="Valuta i tuoi docenti, lascia recensioni e migliora la scuola con il Registro dei Prof.">
+    <title>Registro dei Prof - Valuta i tuoi docenti</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            background-color: #f4f4f4;
+            color: #333;
+            line-height: 1.6;
+        }
+        header {
+            background: #007bff;
+            color: #fff;
+            padding: 20px 0;
+            text-align: center;
+        }
+        h1, h2 {
+            margin: 0;
+        }
+        section {
+            margin: 20px;
+            padding: 20px;
+            background: #fff;
+            border-radius: 5px;
+            box-shadow: 0 0 10px rgba(0, 0, 0, 0.1);
+        }
+        .cta-button {
+            display: inline-block;
+            margin: 10px 5px;
+            padding: 10px 20px;
+            background: #28a745;
+            color: #fff;
+            text-decoration: none;
+            border-radius: 5px;
+        }
+        .cta-button:hover {
+            background: #218838;
+        }
+        .cta-button.secondary {
+            background: #007bff;
+        }
+        .cta-button.secondary:hover {
+            background: #0056b3;
+        }
+        .testimonial {
+            background: #e9ecef;
+            padding: 15px;
+            border-left: 5px solid #007bff;
+            margin: 20px 0;
+        }
+        footer {
+            text-align: center;
+            padding: 20px 0;
+            background: #007bff;
+            color: #fff;
+        }
+        .auth-buttons {
+            text-align: center;
+            margin: 15px 0;
+        }
+        .avviso-box {
+            background: #fff3cd;
+            border-left: 5px solid #ffc107;
+            padding: 20px;
+            margin: 20px auto;
+            max-width: 80%;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        .avviso-item {
+            background: white;
+            padding: 15px;
+            margin: 10px 0;
+            border-radius: 8px;
+            border-left: 4px solid #28a745;
+        }
+        .avviso-item.urgente {
+            border-left-color: #dc3545;
+        }
+        .avviso-item.importante {
+            border-left-color: #ffc107;
+        }
+    </style>
+</head>
+
+<body>
+
+    {% if site_banner and site_banner.attivo and site_banner.messaggio %}
+    <div role="banner" style="background:#1a237e;color:#fff;padding:10px 16px;text-align:center;font-size:14px;">
+        {{ site_banner.messaggio }}
+    </div>
+    {% endif %}
+    
+    <header>
+        <h1>Registro dei Prof</h1>
+        <p>Valuta i tuoi professori!</p>
+    </header>
+
+    <!-- Box Avvisi Home Page (NUOVO) -->
+    {% if avvisi %}
+    <div class="avviso-box">
+        <h3 style="margin:0 0 15px 0; color:#856404;">📢 Avvisi</h3>
+        {% for avviso in avvisi %}
+        {% if avviso.priority in ['urgente', 'importante'] %}
+        <div class="avviso-item {% if avviso.priority == 'urgente' %}urgente{% elif avviso.priority == 'importante' %}importante{% endif %}">
+            <strong style="color:#333;">{{ avviso.titolo }}</strong>
+            <p style="margin:5px 0 0 0; color:#666;">{{ avviso.contenuto }}</p>
+        </div>
+        {% endif %}
+        {% endfor %}
+    </div>
+    {% endif %}
+
+    <section>
+        <h2>Benvenuto nel Registro dei Prof!</h2>
+        <p class="intro-text">Il "Registro dei Prof" è una piattaforma pensata per dare voce agli studenti, permettendo loro di esprimere valutazioni e feedback sui propri insegnanti. Qui puoi lasciare un commento, dare un voto e contribuire a creare un ambiente scolastico più consapevole e trasparente.</p>
+        <p class="intro-text">La tua opinione conta! Condividi la tua esperienza in modo costruttivo e aiutaci a rendere le scuole un luogo migliore per tutti.</p>
+    </section>
+
+    <section>
+        <h2>Come funziona?</h2>
+        <ol>
+            <li><strong>Cerca il tuo docente:</strong> Usa il nostro motore di ricerca per trovare il prof che desideri valutare. Puoi cercare per nome, materia o scuola.</li>
+            <li><strong>Inserimento professori:</strong> Se il tuo docente non è ancora presente nel registro, devi aggiungerlo cliccando sul pulsante "Aggiungi Professore".</li>
+            <li><strong>Lascia una valutazione:</strong> Ogni docente viene valutato su diverse categorie: preparazione, chiarezza, disponibilità, capacità di coinvolgimento e altro. Dai un voto e scrivi un commento.</li>
+            <li><strong>Fai la differenza:</strong> Le tue recensioni aiuteranno gli altri studenti a conoscere meglio i propri insegnanti e contribuiranno a migliorare l'esperienza scolastica complessiva.</li>
+        </ol>
+    </section>
+
+    <section>
+        <h2>Cosa puoi valutare?</h2>
+        <ul>
+            <li><strong>Preparazione:</strong> quanto è preparato il docente sulla materia?</li>
+            <li><strong>Chiarezza:</strong> riesce a spiegare in modo semplice e comprensibile?</li>
+            <li><strong>Disponibilità:</strong> quanto è disponibile per chiarimenti e supporto extra?</li>
+            <li><strong>Metodo di insegnamento:</strong> come gestisce la lezione? È coinvolgente? Usa metodi moderni e interattivi?</li>
+            <li><strong>Rapporto con gli studenti:</strong> è rispettoso e ascolta le esigenze della classe?</li>
+        </ul>
+    </section>
+
+    <section>
+        <h2>Perché lasciare una valutazione?</h2>
+        <p class="intro-text">Il tuo feedback è fondamentale! Ogni valutazione aiuta a:</p>
+        <ul>
+            <li><strong>Migliorare l'insegnamento:</strong> le scuole possono utilizzare i dati per comprendere meglio le esigenze degli studenti e migliorare i programmi.</li>
+            <li><strong>Favorire il dialogo:</strong> condividere esperienze aiuta a promuovere una comunicazione aperta tra studenti e docenti.</li>
+            <li><strong>Costruire una comunità scolastica più forte:</strong> il Registro dei Prof non è solo una piattaforma di valutazione, ma un punto di incontro per riflessioni costruttive su come rendere migliore la scuola per tutti.</li>
+        </ul>
+    </section>
+
+       <section>
+        <h2>Note sulle funzionalità del Registro dei Prof</h2>
+        <li>Nella sezione Gestione Recensioni del registro non bisogna compilare il campo nome studente in quanto si compilerà in automatico</li>
+        <li>Si invita chiunque a lasciare recensioni e valutazioni rispettose, senza contenuti offensivi o discriminatori.</li>
+    </section>
+
+
+    <section>
+        <h2>Unisciti alla comunità!</h2>
+        <p class="intro-text">Inizia subito a valutare i tuoi docenti e condividi la tua esperienza! Registrati ora per avere accesso a tutte le funzionalità del sito e interagire con la community.</p>
+        
+        <div class="auth-buttons">
+            <a href="/registrazione" class="cta-button secondary">📝 Registrati</a>
+            <a href="/login" class="cta-button">Accedi</a>
+        </div>
+        <p style="text-align:center;margin-top:12px;font-size:14px;"><a href="{{ url_for('privacy_informativa') }}">Informativa sulla privacy</a></p>
+    </section>
+    
+    <section class="testimonial">
+        <p>"Finalmente un posto dove posso esprimere la mia opinione sui prof senza paura! Le valutazioni mi sono servite anche per capire meglio come approcciare alcune materie."  
+        <br>– Andrea, studente</p>
+    </section>
+
+    <section class="testimonial">
+        <p>"Trovo che il Registro dei Prof sia un'idea fantastica. Le recensioni mi aiutano a prepararmi meglio per le lezioni."  
+        <br>– Laura, studentessa</p>
+    </section>
+
+    <footer>
+        <p>Hai domande o suggerimenti? <a href="/contatti" style="color:#fff;">Contattaci</a> | <a href="{{ url_for('privacy_informativa') }}" style="color:#fff;">Privacy</a></p>
+        <p>&copy; 2026 Registro dei Prof. Tutti i diritti riservati.</p>
+    </footer>
+
+</body>
+</html> 

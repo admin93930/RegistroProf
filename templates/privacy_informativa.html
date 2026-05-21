@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Informativa sulla privacy - Registro dei Prof</title>
+    <style>
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; margin: 0; background: #f4f6fb; color: #222; line-height: 1.65; }
+        .wrap { max-width: 840px; margin: 0 auto; padding: 24px 18px 56px; background: #fff; min-height: 100vh; box-shadow: 0 0 24px rgba(0,0,0,.06); }
+        h1 { font-size: 1.7rem; margin-top: 0; color: #1a237e; }
+        h2 { font-size: 1.15rem; margin-top: 1.6rem; color: #333; border-bottom: 1px solid #e0e0e0; padding-bottom: 6px; }
+        .note { background: #fff8e1; border-left: 4px solid #ffb300; padding: 12px 14px; margin: 18px 0; font-size: .95rem; }
+        ul { padding-left: 1.2rem; }
+        a { color: #3949ab; }
+        .foot { margin-top: 2rem; font-size: .88rem; color: #555; }
+    </style>
+</head>
+<body>
+<div class="wrap">
+    <p><a href="{{ url_for('login') }}">« Torna ad accesso / registrazione</a> · <a href="{{ url_for('home') }}">Home</a></p>
+    <h1>Informativa sulla privacy</h1>
+    <p><strong>Ultimo aggiornamento:</strong> maggio 2026</p>
+
+    <div class="note">
+        <strong>Ambito.</strong> Questo documento descrive come il servizio digitale «Registro dei Prof» tratta i dati personali degli utenti registrati, visitatori e, ove applicabile, degli account collegati tramite login federato (es. Google o Microsoft). Il testo è predisposto sulle linee guida del Regolamento (UE) 2016/679 («GDPR») e del D.lgs. 196/2003 come modificato («Codice Privacy»). <strong>Il titolare del trattamento deve personalizzare gli estremi identificativi sotto (ragione sociale, indirizzo e contatti)</strong> perché l’informativa produca effetti idonei nei confronti degli interessati in relazione all’organizzazione giuridica reale del servizio (privato, associazione studentesca, scuola, ecc.).
+    </div>
+
+    <h2>1. Titolare del trattamento</h2>
+    <p><strong>[INSERIRE]</strong> denominazione, sede legale indirizzo completo, Codice fiscale / Partita IVA.<br>
+    Email di contatto privacy: <strong>anastasiandrea82@gmail.com</strong></p>
+
+    <h2>2. Responsabile della protezione dei dati (facoltativo)</h2>
+    <p>Qualora applicabile: <strong>[INSERIRE nominativo e contatti DPO]</strong>. Se non nominato, questo paragrafo può essere rimosso dopo verifica legale.</p>
+
+    <h2>3. Finalità e basi giuridiche</h2>
+    <ul>
+        <li><strong>Erogazione del servizio</strong> (registrazione, profilo, pubblicazione di recensioni commentate, voti, caricamento di materiali didattici, calendario degli esami, gruppi e funzioni sociali come follow/seguiti/suggerimenti sui docenti): necessità contrattuale (art. 6(1)(b) GDPR) e misure precontrattuali.</li>
+        <li><strong>Sicurezza, prevenzione abusi e rate limiting</strong> (log tecnici, cronologia accessi, limitazioni automatiche, eventuale ban degli IP): legittimo interesse (art. 6(1)(f) GDPR), bilanciato con diritti dell’utente.</li>
+        <li><strong>Gestione reclami, ticket assistenza, comunicazioni amministrative:</strong> contratto / servizio e, per gli admin, legittimo interesse.</li>
+        <li><strong>Adempimenti di legge:</strong> es. obblighi fiscali per fatturazione o ordini dell’Autorità giudiziaria (art. 6(1)(c) GDPR).</li>
+        <li><strong>Marketing in-app o avvisi sistema / preferenze notifiche:</strong> configurabili dall’utente; comunicazioni del tutto simil-privacy o di servizio possono basarsi su contratto o legittimo interesse, salvo diversa scelta del titolare e consenso ove richiesto dalla legge applicabile.</li>
+        <li><strong>Newsletter e invii email di massa</strong> quando attivati dall’amministratore: in genere richiedono <strong>consenso esplicito</strong> (art. 6(1)(a) GDPR) salvo ipotesi di «soft opt-in» valutabili solo con consulenza legale specifica.</li>
+    </ul>
+
+    <h2>4. Tipologie di dati trattati</h2>
+    <ul>
+        <li>Dati anagrafici e di contatto (nome utente, email, telefono, indirizzo se fornito, scuola di riferimento).</li>
+        <li>Contenuti generati dall’utente (testi di recensioni, commenti, allegati caricati nei limiti tecnici).</li>
+        <li>Dati di autenticazione (password eventualmente recuperata solo come hash).</li>
+        <li>Dati da login social quando attivati (Google, Microsoft, Facebook): identificativi tecnici OAuth2 (subject), nome ed email pubbliche secondo configurazione dell’Identity Provider.</li>
+        <li>Dati di navigazione e log tecnici (indirizzo IP, user-agent, marca temporale degli accessi, identificatori di sessione).</li>
+    </ul>
+
+    <h2>5. Modalità di trattamento e conservazione</h2>
+    <p>I dati sono trattati con strumenti elettronici, con logiche correlate alle finalità indicate. Il periodo di conservazione dipende dalla necessità documentale interna del titolare e dagli eventuali obblighi normativi. I log di sicurezza possono essere mantenuti per periodi proporzionali (es. 12–24 mesi) salvo diverso provvedimento. L’utente può richiedere la cancellazione nell’ambito dei diritti elencati al §7.</p>
+
+    <h2>6. Comunicazione e trasferimento</h2>
+    <p>I dati possono essere trattati da personale tecnico incaricato, fornitori di hosting/email e, per i login social, dagli Identity Provider sopra nominati anche al di fuori dello SEE; in tale caso saranno osservati adeguamenti (es. SCC, decisioni di adeguatezza) laddove necessari.</p>
+
+    <h2>7. Diritti dell’interessato</h2>
+    <p>In qualità di interessato, Lei può esercitare — nei limiti e con le modalità degli artt. 15–22 GDPR — i diritti di accesso, rettifica, cancellazione («diritto all’oblio»), limitazione, portabilità, opposizione, revoca del consenso ove prestato e reclamo al Garante (<a href="https://www.garanteprivacy.it" target="_blank" rel="noopener noreferrer">www.garanteprivacy.it</a>). Nel servizio è prevista anche una funzione di <strong>esportazione</strong> dei dati dell’account in formato leggibile dall’interessato (JSON/CSV).</p>
+
+    <h2>8. Sicurezza</h2>
+    <p>Sono applicate misure tecniche e organizzative adeguate (connessioni cifrabili quando configurato dall’hosting, limitazione delle richieste API, registrazioni di accesso, gestione degli account compromessi, flag di contenuti dalla community). Nessun sistema è immune da incidenti; in caso di violazione saranno osservati gli obblighi degli artt. 33–34 GDPR.</p>
+
+    <h2>9. Minori</h2>
+    <p>Il servizio non è destinato a minori di 14 anni non autorizzati. Il titolare può sopprimere gli account ritenuti non conformi.</p>
+
+    <h2>10. Modifiche</h2>
+    <p>Questa informativa può essere aggiornata. Le modifiche significative saranno comunicate tramite gli opportuni canali (es. banner globale sul sito, avviso in-app).</p>
+
+    <p class="foot">«Registro dei Prof» è un progetto tecnico-educativo. Le parti contrassegnate <strong>[INSERIRE]</strong> costituiscono elementi indispensabili per la completezza legale della presente informative e vanno compilate prima della pubblicazione in produzione.</p>
+</div>
+</body>
+</html>

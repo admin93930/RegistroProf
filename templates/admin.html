@@ -1,0 +1,1063 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Dashboard Admin Pro - Registro dei Prof</title>
+<!-- Chart.js per i grafici -->
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<!-- jsPDF e jsPDF-AutoTable per export PDF -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.28/jspdf.plugin.autotable.min.js"></script>
+<!-- SheetJS per export Excel -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<style>
+    /* ================= BASE STYLES (mantenuti) ================= */
+    * { box-sizing: border-box; }
+    body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; margin: 0; background: #f5f7fa; transition: background 0.3s, color 0.3s; }
+    body.dark-mode { background: #1a1a2e; color: #eee; }
+    body.dark-mode .stat-card, body.dark-mode section, body.dark-mode .modal-content, 
+    body.dark-mode .dropdown-notifiche, body.dark-mode .anagrafica-card, 
+    body.dark-mode .risposta-item, body.dark-mode #ticketAdminInfo { 
+        background: #16213e; color: #eee; border-color: #0f3460; 
+    }
+    body.dark-mode th { background: linear-gradient(135deg, #0f3460 0%, #1a1a2e 100%); }
+    body.dark-mode tr:hover { background: #0f3460; }
+    body.dark-mode .filter-input, body.dark-mode .modal-content input, 
+    body.dark-mode .modal-content select, body.dark-mode .modal-content textarea { 
+        background: #0f3460; border-color: #1a1a2e; color: #eee; 
+    }
+    body.dark-mode .badge { opacity: 0.9; }
+    
+    header { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 15px 30px; display: flex; justify-content: space-between; align-items: center; box-shadow: 0 4px 15px rgba(0,0,0,0.1); position: sticky; top: 0; z-index: 100; }
+    header h1 { margin: 0; font-size: 24px; }
+    header .user-info { display: flex; align-items: center; gap: 15px; }
+    header .user-info span { opacity: 0.9; }
+    header button { background: #e74c3c; border: none; color: white; padding: 10px 20px; border-radius: 8px; cursor: pointer; font-weight: 600; transition: 0.3s; }
+    header button:hover { background: #c0392b; transform: translateY(-2px); }
+    
+    .container { display: flex; min-height: calc(100vh - 70px); }
+    .sidebar { width: 260px; background: linear-gradient(180deg, #2c3e50 0%, #1a252f 100%); color: white; padding: 20px 0; position: fixed; height: 100vh; overflow-y: auto; z-index: 90; }
+    .sidebar h3 { padding: 0 20px 20px; margin: 0; border-bottom: 1px solid rgba(255,255,255,0.1); font-size: 16px; opacity: 0.8; }
+    .sidebar nav { padding: 10px 0; }
+    .sidebar a { display: flex; align-items: center; padding: 14px 20px; color: rgba(255,255,255,0.8); text-decoration: none; transition: 0.3s; border-left: 4px solid transparent; }
+    .sidebar a:hover, .sidebar a.active { background: rgba(255,255,255,0.1); color: white; border-left-color: #4CAF50; }
+    .sidebar a span { margin-left: 12px; }
+    .main-content { margin-left: 260px; flex: 1; padding: 30px; }
+    
+    /* Stats Grid */
+    .stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 20px; margin-bottom: 30px; }
+    .stat-card { background: white; padding: 25px; border-radius: 16px; box-shadow: 0 4px 20px rgba(0,0,0,0.08); transition: 0.3s; cursor: pointer; }
+    .stat-card:hover { transform: translateY(-5px); box-shadow: 0 10px 30px rgba(0,0,0,0.12); }
+    .stat-card .icon { font-size: 32px; margin-bottom: 10px; }
+    .stat-card .number { font-size: 32px; font-weight: bold; color: #333; }
+    .stat-card .label { color: #888; font-size: 14px; margin-top: 5px; }
+    .stat-card.purple { border-left: 4px solid #667eea; }
+    .stat-card.green { border-left: 4px solid #4CAF50; }
+    .stat-card.orange { border-left: 4px solid #FF9800; }
+    .stat-card.blue { border-left: 4px solid #2196F3; }
+    
+    /* Sections */
+    section { display: none; background: white; padding: 30px; border-radius: 16px; box-shadow: 0 4px 20px rgba(0,0,0,0.08); margin-bottom: 30px; }
+    section.active { display: block; animation: fadeIn 0.3s ease; }
+    @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+    section h2 { margin: 0 0 20px 0; color: #333; display: flex; align-items: center; gap: 10px; }
+    
+    /* Tables */
+    .table-container { overflow-x: auto; }
+    table { width: 100%; border-collapse: collapse; margin-top: 15px; }
+    th, td { padding: 14px 16px; text-align: left; border-bottom: 1px solid #eee; }
+    th { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; font-weight: 600; text-transform: uppercase; font-size: 12px; letter-spacing: 0.5px; }
+    tr:hover { background: #f8f9fa; }
+    tr:last-child td { border-bottom: none; }
+    
+    /* Buttons */
+    .btn { padding: 8px 16px; border: none; border-radius: 8px; cursor: pointer; font-weight: 600; transition: 0.3s; margin-right: 5px; display: inline-flex; align-items: center; gap: 5px; }
+    .btn-primary { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; }
+    .btn-primary:hover { transform: translateY(-2px); box-shadow: 0 5px 15px rgba(102,126,234,0.4); }
+    .btn-success { background: #4CAF50; color: white; }
+    .btn-success:hover { background: #45a049; }
+    .btn-warning { background: #FF9800; color: white; }
+    .btn-warning:hover { background: #f57c00; }
+    .btn-danger { background: #f44336; color: white; }
+    .btn-danger:hover { background: #d32f2f; }
+    .btn-info { background: #2196F3; color: white; }
+    .btn-info:hover { background: #1976D2; }
+    .btn-secondary { background: #6c757d; color: white; }
+    .btn-secondary:hover { background: #5a6268; }
+    .btn-sm { padding: 6px 12px; font-size: 13px; }
+    .btn-group { display: flex; gap: 10px; flex-wrap: wrap; }
+    
+    /* Filters & Controls */
+    .filters-bar { display: flex; gap: 15px; margin-bottom: 20px; flex-wrap: wrap; align-items: center; padding: 15px; background: #f8f9fa; border-radius: 12px; }
+    .filter-input { padding: 12px 16px; border: 2px solid #e0e0e0; border-radius: 10px; font-size: 14px; transition: 0.3s; min-width: 200px; }
+    .filter-input:focus { outline: none; border-color: #667eea; box-shadow: 0 0 0 3px rgba(102,126,234,0.1); }
+    .filter-select { padding: 12px 16px; border: 2px solid #e0e0e0; border-radius: 10px; font-size: 14px; background: white; cursor: pointer; }
+    
+    /* Average Box */
+    .average-box { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 15px 25px; border-radius: 12px; margin-bottom: 20px; display: flex; align-items: center; gap: 15px; }
+    .average-box .value { font-size: 28px; font-weight: bold; }
+    .average-box .label { opacity: 0.9; font-size: 14px; }
+    
+    /* Export Buttons */
+    .export-buttons { display: flex; gap: 10px; margin-bottom: 20px; flex-wrap: wrap; }
+    
+    /* Modals */
+    .modal { display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.5); backdrop-filter: blur(4px); justify-content: center; align-items: center; z-index: 2000; animation: fadeIn 0.2s ease; }
+    .modal.active { display: flex; }
+    .modal-content { background: white; padding: 30px; border-radius: 20px; width: 90%; max-width: 450px; box-shadow: 0 25px 50px rgba(0,0,0,0.25); animation: slideUp 0.3s ease; max-height: 90vh; overflow-y: auto; }
+    .modal-content.large { max-width: 800px; }
+    .modal-content.xl { max-width: 1000px; }
+    .modal-content h3 { margin: 0 0 20px 0; color: #333; }
+    .modal-content input, .modal-content select, .modal-content textarea { width: 100%; padding: 12px 16px; margin: 8px 0; border: 2px solid #e0e0e0; border-radius: 10px; font-size: 14px; transition: 0.3s; }
+    .modal-content input:focus, .modal-content select:focus, .modal-content textarea:focus { outline: none; border-color: #667eea; }
+    .modal-content textarea { min-height: 100px; resize: vertical; }
+    .modal-content .btn-group { display: flex; gap: 10px; margin-top: 20px; justify-content: flex-end; flex-wrap: wrap; }
+    @keyframes slideUp { from { transform: translateY(30px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
+    
+    /* Badges */
+    .badge { padding: 4px 12px; border-radius: 20px; font-size: 12px; font-weight: 600; display: inline-flex; align-items: center; gap: 4px; }
+    .badge-admin { background: #ffebee; color: #c62828; }
+    .badge-user { background: #e3f2fd; color: #1565c0; }
+    .badge-pending { background: #fff3cd; color: #856404; }
+    .badge-resolved { background: #d4edda; color: #155724; }
+    .badge-dismissed { background: #f8d7da; color: #721c24; }
+    .badge-attivo { background: #e8f5e9; color: #2e7d32; }
+    .badge-sospeso { background: #fff3e0; color: #ef6c00; }
+    .badge-bannato { background: #ffebee; color: #c62828; }
+    
+    /* Toast */
+    #toast { position: fixed; bottom: 30px; right: 30px; background: #333; color: white; padding: 14px 24px; border-radius: 10px; z-index: 9999; opacity: 0; transition: 0.3s; pointer-events: none; max-width: 350px; }
+    #toast.show { opacity: 1; transform: translateY(-10px); }
+    #toast.success { background: #4CAF50; }
+    #toast.error { background: #f44336; }
+    #toast.info { background: #2196F3; }
+    
+    /* Notifications */
+    .notifiche-container { position: relative; display: inline-block; }
+    .btn-notifiche { background: rgba(255,255,255,0.2); width: 45px; height: 45px; border-radius: 50%; border: 2px solid rgba(255,255,255,0.3); cursor: pointer; font-size: 20px; transition: all 0.3s ease; display: flex; align-items: center; justify-content: center; }
+    .btn-notifiche:hover { background: rgba(255,255,255,0.3); transform: scale(1.1); }
+    .badge-notifiche { position: absolute; top: -5px; right: -5px; background: #f44336; color: white; border-radius: 50%; padding: 3px 7px; font-size: 11px; font-weight: bold; min-width: 20px; text-align: center; animation: pulse 2s infinite; }
+    .badge-notifiche.nascosto { display: none; }
+    @keyframes pulse { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.1); } }
+    .dropdown-notifiche { display: none; position: absolute; right: 0; top: 55px; background: white; border-radius: 15px; box-shadow: 0 10px 40px rgba(0,0,0,0.2); min-width: 380px; max-height: 450px; overflow-y: auto; z-index: 1000; animation: slideDown 0.3s ease; }
+    .dropdown-notifiche.aperto { display: block; }
+    .dropdown-notifiche h3 { margin: 0; padding: 18px 20px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; border-radius: 15px 15px 0 0; font-size: 16px; font-weight: 600; }
+    .notifica-item { padding: 18px 20px; border-bottom: 1px solid #f0f0f0; cursor: pointer; transition: all 0.3s ease; }
+    .notifica-item:hover { background: linear-gradient(90deg, #f5f7fa 0%, #fff 100%); transform: translateX(5px); }
+    .notifica-item.nuova { background: linear-gradient(90deg, #e3f2fd 0%, #fff 100%); border-left: 4px solid #2196F3; }
+    .notifica-item.letta { opacity: 0.7; }
+    .notifica-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
+    .notifica-tipo { font-size: 10px; padding: 3px 10px; border-radius: 12px; font-weight: 700; text-transform: uppercase; }
+    .notifica-tipo.ticket { background: #e3f2fd; color: #1565c0; }
+    .notifica-tipo.registrazione { background: #fff3e0; color: #ef6c00; }
+    .notifica-tipo.segnalazione { background: #ffebee; color: #c62828; }
+    .notifica-tipo.sistema { background: #f3e5f5; color: #7b1fa2; }
+    .notifica-tipo.push { background: #e8f5e9; color: #2e7d32; }
+    .notifica-titolo { font-weight: 600; color: #333; margin-bottom: 6px; font-size: 14px; }
+    .notifica-messaggio { font-size: 13px; color: #666; margin-bottom: 8px; line-height: 1.5; }
+    .notifica-data { font-size: 11px; color: #999; }
+    .notifica-azioni { display: flex; gap: 8px; margin-top: 12px; }
+    .notifica-azioni button { padding: 6px 14px; font-size: 11px; border-radius: 20px; }
+    .nessuna-notifica { padding: 40px 20px; text-align: center; color: #999; font-size: 14px; }
+    .segna-tutte-lette { padding: 15px 20px; text-align: center; border-top: 2px solid #f0f0f0; }
+    .segna-tutte-lette button { background: transparent; color: #667eea; border: 2px solid #667eea; padding: 8px 20px; border-radius: 25px; font-size: 12px; font-weight: 600; cursor: pointer; transition: all 0.3s ease; }
+    .segna-tutte-lette button:hover { background: #667eea; color: white; transform: translateY(-2px); }
+    @keyframes slideDown { from { opacity: 0; transform: translateY(-20px); } to { opacity: 1; transform: translateY(0); } }
+    
+    /* Ticket Styles */
+    .priorita-bassa { color: #4CAF50; font-weight: 600; }
+    .priorita-media { color: #FF9800; font-weight: 600; }
+    .priorita-alta { color: #ff5722; font-weight: 600; }
+    .priorita-urgente { color: #f44336; font-weight: 600; }
+    .stato-aperto { background: #e3f2fd; color: #1565c0; padding: 5px 12px; border-radius: 20px; font-size: 12px; font-weight: 600; }
+    .stato-in_lavorazione { background: #fff3e0; color: #ef6c00; padding: 5px 12px; border-radius: 20px; font-size: 12px; font-weight: 600; }
+    .stato-risolto { background: #e8f5e9; color: #2e7d32; padding: 5px 12px; border-radius: 20px; font-size: 12px; font-weight: 600; }
+    .stato-chiuso { background: #f5f5f5; color: #616161; padding: 5px 12px; border-radius: 20px; font-size: 12px; font-weight: 600; }
+    .risposta-item { background: #f5f7fa; padding: 15px; margin: 10px 0; border-radius: 10px; border-left: 4px solid #667eea; }
+    .risposta-item.admin { border-left-color: #f5576c; }
+    .risposta-header { display: flex; justify-content: space-between; margin-bottom: 10px; font-size: 12px; color: #666; }
+    .risposta-messaggio { color: #333; line-height: 1.6; }
+    
+    /* Anagrafica */
+    .anagrafica-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 20px; margin-bottom: 20px; }
+    .anagrafica-card { background: #f8f9fa; padding: 20px; border-radius: 12px; border-left: 4px solid #667eea; }
+    .anagrafica-card h4 { margin: 0 0 15px 0; color: #333; font-size: 14px; text-transform: uppercase; letter-spacing: 0.5px; }
+    .anagrafica-card .info-row { display: flex; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid #e0e0e0; }
+    .anagrafica-card .info-row:last-child { border-bottom: none; }
+    .anagrafica-card .label { color: #666; font-size: 13px; }
+    .anagrafica-card .value { color: #333; font-weight: 600; font-size: 14px; }
+    .anagrafica-stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 15px; margin-top: 20px; }
+    .anagrafica-stat { background: white; padding: 15px; border-radius: 10px; text-align: center; box-shadow: 0 2px 10px rgba(0,0,0,0.05); }
+    .anagrafica-stat .number { font-size: 28px; font-weight: bold; color: #667eea; }
+    .anagrafica-stat .label { font-size: 12px; color: #666; margin-top: 5px; }
+    
+    /* Charts Section */
+    .charts-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(400px, 1fr)); gap: 25px; margin: 20px 0; }
+    .chart-card { background: white; padding: 20px; border-radius: 16px; box-shadow: 0 4px 20px rgba(0,0,0,0.08); }
+    .chart-card h4 { margin: 0 0 15px 0; color: #333; display: flex; align-items: center; gap: 8px; }
+    .chart-container { position: relative; height: 300px; }
+    
+    /* Top Professor Card */
+    .top-prof-card { background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%); color: white; padding: 25px; border-radius: 16px; margin-bottom: 20px; display: flex; align-items: center; gap: 20px; }
+    .top-prof-avatar { width: 80px; height: 80px; border-radius: 50%; background: rgba(255,255,255,0.2); display: flex; align-items: center; justify-content: center; font-size: 32px; }
+    .top-prof-info h4 { margin: 0 0 5px 0; font-size: 20px; }
+    .top-prof-info p { margin: 3px 0; opacity: 0.9; }
+    .top-prof-stats { display: flex; gap: 20px; margin-top: 10px; }
+    .top-prof-stat { text-align: center; }
+    .top-prof-stat .num { font-size: 24px; font-weight: bold; }
+    .top-prof-stat .lbl { font-size: 12px; opacity: 0.9; }
+    
+    /* Activity Log */
+    .log-entry { padding: 12px 15px; border-left: 3px solid #667eea; background: #f8f9fa; margin: 8px 0; border-radius: 0 8px 8px 0; font-size: 14px; }
+    .log-entry .time { color: #999; font-size: 12px; margin-left: 10px; }
+    .log-entry.admin { border-left-color: #f5576c; background: #fff5f5; }
+    .log-entry.user { border-left-color: #4CAF50; }
+    
+    /* Quick Templates */
+    .templates-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 15px; margin: 15px 0; }
+    .template-card { padding: 15px; border: 2px solid #e0e0e0; border-radius: 12px; cursor: pointer; transition: 0.3s; }
+    .template-card:hover { border-color: #667eea; background: #f8f9fa; transform: translateY(-2px); }
+    .template-card .title { font-weight: 600; color: #333; margin-bottom: 5px; }
+    .template-card .preview { font-size: 13px; color: #666; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+    
+    /* Push Notification Modal */
+    .push-form .form-row { display: flex; gap: 15px; margin: 15px 0; flex-wrap: wrap; }
+    .push-form .form-row > * { flex: 1; min-width: 200px; }
+    .push-form label { display: block; margin-bottom: 5px; font-weight: 600; color: #555; font-size: 13px; }
+    
+    /* Chat Widget */
+    .chat-widget { position: fixed; bottom: 20px; right: 20px; width: 350px; background: white; border-radius: 16px; box-shadow: 0 10px 40px rgba(0,0,0,0.2); z-index: 1500; display: none; flex-direction: column; }
+    .chat-widget.active { display: flex; }
+    .chat-header { padding: 15px 20px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; border-radius: 16px 16px 0 0; display: flex; justify-content: space-between; align-items: center; cursor: pointer; }
+    .chat-body { padding: 15px; max-height: 300px; overflow-y: auto; display: flex; flex-direction: column; gap: 10px; }
+    .chat-message { padding: 10px 15px; border-radius: 12px; max-width: 85%; font-size: 14px; }
+    .chat-message.admin { background: #667eea; color: white; align-self: flex-end; border-bottom-right-radius: 4px; }
+    .chat-message.user { background: #f0f0f0; color: #333; align-self: flex-start; border-bottom-left-radius: 4px; }
+    .chat-footer { padding: 15px; border-top: 1px solid #eee; display: flex; gap: 10px; }
+    .chat-footer input { flex: 1; padding: 10px 15px; border: 2px solid #e0e0e0; border-radius: 25px; font-size: 14px; }
+    .chat-footer button { padding: 10px 20px; border-radius: 25px; }
+    
+    /* Dark Mode Toggle */
+    .theme-toggle { background: rgba(255,255,255,0.2); width: 45px; height: 45px; border-radius: 50%; border: 2px solid rgba(255,255,255,0.3); cursor: pointer; font-size: 20px; transition: all 0.3s ease; display: flex; align-items: center; justify-content: center; }
+    .theme-toggle:hover { background: rgba(255,255,255,0.3); transform: scale(1.1); }
+    
+    /* Responsive */
+    @media (max-width: 1024px) {
+        .sidebar { width: 70px; }
+        .sidebar h3, .sidebar a span { display: none; }
+        .sidebar a { justify-content: center; padding: 14px; }
+        .main-content { margin-left: 70px; }
+        .charts-grid { grid-template-columns: 1fr; }
+    }
+    @media (max-width: 768px) {
+        header { flex-wrap: wrap; gap: 10px; }
+        .filters-bar { flex-direction: column; align-items: stretch; }
+        .stats-grid { grid-template-columns: repeat(2, 1fr); }
+        .anagrafica-stats { grid-template-columns: 1fr; }
+        .chat-widget { width: calc(100% - 40px); right: 20px; }
+    }
+</style>
+</head>
+<body>
+
+{% if site_banner and site_banner.attivo and site_banner.messaggio %}
+<div role="banner" style="background:#c62828;color:#fff;padding:10px 20px;text-align:center;font-size:14px;">
+    {{ site_banner.messaggio }}
+</div>
+{% endif %}
+
+<header>
+    <h1>⚙️ Dashboard Admin Pro</h1>
+    <div class="user-info">
+        <button class="theme-toggle" onclick="toggleDarkMode()" title="Dark Mode">🌙</button>
+        <div class="notifiche-container">
+            <button class="btn-notifiche" onclick="toggleNotifiche()" title="Notifiche">🔔</button>
+            <span id="badgeNotifiche" class="badge-notifiche nascosto">0</span>
+            <div id="dropdownNotifiche" class="dropdown-notifiche">
+                <h3>🔔 Notifiche</h3>
+                <div id="listaNotifiche"></div>
+                <div class="segna-tutte-lette">
+                    <button onclick="segnaTutteLette()">✅ Segna tutte come lette</button>
+                </div>
+            </div>
+        </div>
+        <span>👤 <span id="dashHeaderUser">{{ username }}</span></span>
+        <button onclick="window.location.href='/logout'">🚪 Logout</button>
+    </div>
+</header>
+
+<div class="container">
+    <aside class="sidebar">
+        <h3>MENU</h3>
+        <nav>
+            <a href="#" class="active" onclick="apriSection('dashboard', this); return false;">📊 <span>Dashboard</span></a>
+            <a href="#" onclick="apriSection('voti', this); return false;">⭐ <span>Voti</span></a>
+            <a href="#" onclick="apriSection('recensioni', this); return false;">💬 <span>Recensioni</span></a>
+            <a href="#" onclick="apriSection('professori', this); return false;">👨‍🏫 <span>Professori</span></a>
+            <a href="#" onclick="apriSection('materie', this); return false;">📘 <span>Materie</span></a>
+            <a href="#" onclick="apriSection('scuole', this); return false;">🏫 <span>Scuole</span></a>
+            <a href="#" onclick="apriSection('utenti', this); return false;">👥 <span>Utenti</span></a>
+            <a href="#" onclick="apriSection('ruoli', this); return false;">🪪 <span>Ruoli</span></a>
+            <a href="#" onclick="apriSection('registrazioni', this); return false;">📋 <span>Registrazioni <span id="badgeRegistrazioni" class="badge badge-pending" style="display:none;">0</span></span></a>
+            <a href="#" onclick="apriSection('ticket', this); return false;">🎫 <span>Ticket Supporto <span id="badgeTicket" class="badge badge-pending" style="display:none;">0</span></span></a>
+            <a href="#" onclick="apriSection('sessioni', this); return false;">🔐 <span>Sessioni Attive</span></a>
+            <a href="#" onclick="apriSection('segnalazioni', this); return false;">🚩 <span>Segnalazioni <span id="badgeSegnalazioni" class="badge badge-admin" style="display:none;">0</span></span></a>
+            <a href="#" onclick="apriSection('avvisi', this); return false;">📣 <span>Avvisi bacheca</span></a>
+            <a href="#" onclick="apriSection('global_banner', this); return false;">📢 <span>Banner globale</span></a>
+            <a href="#" onclick="apriSection('ip_ban', this); return false;">🛡️ <span>IP Ban</span></a>
+            <a href="#" onclick="apriSection('newsletter', this); return false;">✉️ <span>Newsletter</span></a>
+            <a href="#" onclick="apriSection('ticket_templates', this); return false;">🧩 <span>Template ticket</span></a>
+            <a href="#" onclick="apriSection('privacy_rgpd', this); return false;">🔒 <span>Privacy / cancellazioni</span></a>
+            <a href="#" onclick="apriSection('danger_reset', this); return false;">⚠️ <span>Reset sistema</span></a>
+            <a href="#" onclick="apriSection('log', this); return false;">📜 <span>Log Attività</span></a>
+            <a href="#" onclick="apriSection('impostazioni', this); return false;">⚙️ <span>Impostazioni</span></a>
+        </nav>
+    </aside>
+    
+    <main class="main-content">
+        <!-- DASHBOARD SECTION -->
+        <section id="dashboard" class="active">
+            <h2>📊 Panoramica Dashboard</h2>
+            
+            <!-- Stats Cards -->
+            <div class="stats-grid">
+                <div class="stat-card purple"><div class="icon">👨‍🏫</div><div class="number" id="statProfessori">0</div><div class="label">Professori</div></div>
+                <div class="stat-card green"><div class="icon">⭐</div><div class="number" id="statVoti">0</div><div class="label">Voti Totali</div></div>
+                <div class="stat-card orange"><div class="icon">💬</div><div class="number" id="statRecensioni">0</div><div class="label">Recensioni</div></div>
+                <div class="stat-card blue"><div class="number" id="statUtenti">0</div><div class="label">Utenti Attivi</div></div>
+            </div>
+            
+            <!-- Top Professor Card -->
+            <div class="top-prof-card">
+                <div class="top-prof-avatar">🏆</div>
+                <div class="top-prof-info">
+                    <h4 id="topProfNome">Prof. Mario Rossi</h4>
+                    <p>📚 Matematica • 🏫 Liceo Scientifico</p>
+                    <p>⭐ Media recensioni: <strong id="topProfMedia">9.4/10</strong></p>
+                    <div class="top-prof-stats">
+                        <div class="top-prof-stat"><div class="num" id="topProfVoti">156</div><div class="lbl">Voti</div></div>
+                        <div class="top-prof-stat"><div class="num" id="topProfRec">42</div><div class="lbl">Recensioni</div></div>
+                        <div class="top-prof-stat"><div class="num">+12%</div><div class="lbl">vs mese scorso</div></div>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Charts -->
+            <div class="charts-grid">
+                <div class="chart-card">
+                    <h4>📈 Andamento Voti nel Tempo</h4>
+                    <div class="chart-container"><canvas id="chartVoti"></canvas></div>
+                </div>
+                <div class="chart-card">
+                    <h4>🏫 Distribuzione per Scuola</h4>
+                    <div class="chart-container"><canvas id="chartScuole"></canvas></div>
+                </div>
+                <div class="chart-card">
+                    <h4>⭐ Media Voti per Materia</h4>
+                    <div class="chart-container"><canvas id="chartMaterie"></canvas></div>
+                </div>
+                <div class="chart-card">
+                    <h4>👥 Utenti per Ruolo</h4>
+                    <div class="chart-container"><canvas id="chartRuoli"></canvas></div>
+                </div>
+            </div>
+            
+            <!-- Quick Actions -->
+            <div style="display:flex; gap:15px; flex-wrap:wrap; margin-top:20px;">
+                <button class="btn btn-primary" onclick="apriSection('voti'); document.querySelector('.sidebar a[onclick*=\"voti\"]').click();">➕ Aggiungi Voto</button>
+                <button class="btn btn-success" onclick="inviaPushNotification()">📢 Invia Notifica Push</button>
+                <button class="btn btn-info" onclick="toggleChat()">💬 Chat Supporto</button>
+                <button class="btn btn-warning" onclick="eseguiBackup()">💾 Backup Database</button>
+            </div>
+        </section>
+        
+        <!-- VOTI SECTION (POTENZIATA) -->
+        <section id="voti">
+            <h2>⭐ Gestione Voti Avanzata</h2>
+            
+            <!-- Average Box -->
+            <div class="average-box">
+                <span class="label">📊 Media voti visualizzati:</span>
+                <span class="value" id="mediaVoti">-</span>
+                <span class="label" style="margin-left:20px;">📋 Totale: <strong id="countVoti">0</strong></span>
+            </div>
+            
+            <!-- Filters Bar -->
+            <div class="filters-bar">
+                <input type="text" class="filter-input" placeholder="🔍 Cerca..." oninput="filtraVoti()" id="filtroTestoVoti">
+                <select class="filter-select" onchange="filtraVoti()" id="filtroMateria">
+                    <option value="">Tutte le Materie</option>
+                    <option>Matematica</option>
+                    <option>Italiano</option>
+                    <option>Storia</option>
+                    <option>Inglese</option>
+                    <option>Fisica</option>
+                    <option>Chimica</option>
+                </select>
+                <select class="filter-select" onchange="filtraVoti()" id="filtroScuola">
+                    <option value="">Tutte le Scuole</option>
+                    <option>Liceo Scientifico</option>
+                    <option>Liceo Classico</option>
+                    <option>Istituto Tecnico</option>
+                    <option>Istituto Professionale</option>
+                </select>
+                <select class="filter-select" onchange="filtraVoti()" id="filtroAnno">
+                    <option value="">Tutti gli Anni</option>
+                    <option>2024/2025</option>
+                    <option>2023/2024</option>
+                    <option>2022/2023</option>
+                </select>
+                <button class="btn btn-secondary btn-sm" onclick="resetFiltriVoti()">🔄 Reset</button>
+            </div>
+            
+            <!-- Export Buttons -->
+            <div class="export-buttons">
+                <button class="btn btn-primary" onclick="aggiungiVoto()">➕ Aggiungi Voto</button>
+                <button class="btn btn-success" onclick="exportExcel('voti')">📊 Export Excel</button>
+                <button class="btn btn-danger" onclick="exportPDF('voti')">📄 Export PDF</button>
+                <button class="btn btn-info" onclick="stampaVoti()">🖨️ Stampa</button>
+            </div>
+            
+            <div class="table-container">
+                <table id="tabellaVoti">
+                    <thead>
+                        <tr>
+                            <th><input type="checkbox" onchange="toggleSelectAllVoti(this)"></th>
+                            <th>Utente</th>
+                            <th>Professore</th>
+                            <th>Materia</th>
+                            <th>Scuola</th>
+                            <th>Anno</th>
+                            <th>Voto</th>
+                            <th>Data</th>
+                            <th>Azioni</th>
+                        </tr>
+                    </thead>
+                    <tbody></tbody>
+                </table>
+            </div>
+            <div style="margin-top:15px; display:flex; gap:10px;">
+                <button class="btn btn-danger btn-sm" onclick="eliminaVotiSelezionati()">🗑️ Elimina Selezionati</button>
+                <span id="selectedCount" style="color:#666; font-size:13px; align-self:center;"></span>
+            </div>
+        </section>
+        
+        <!-- RECENSIONI SECTION -->
+        <section id="recensioni">
+            <h2>💬 Gestione Recensioni</h2>
+            <div class="filters-bar">
+                <input type="text" class="filter-input" placeholder="🔍 Cerca recensione..." oninput="filtraRecensioni()">
+                <select class="filter-select" onchange="filtraRecensioni()">
+                    <option value="">Tutti i Professori</option>
+                </select>
+            </div>
+            <div class="export-buttons">
+                <button class="btn btn-primary" onclick="apriModalRecensioneAdmin()">➕ Crea recensione per utente</button>
+                <button class="btn btn-success" onclick="exportExcel('recensioni')">📊 Export Excel</button>
+                <button class="btn btn-danger" onclick="exportPDF('recensioni')">📄 Export PDF</button>
+            </div>
+            <div class="table-container">
+                <table id="tabellaRecensioni">
+                    <thead><tr><th>Utente</th><th>Professore</th><th>Recensione</th><th>Voto</th><th>Data</th><th>Azioni</th></tr></thead>
+                    <tbody></tbody>
+                </table>
+            </div>
+        </section>
+        
+        <!-- PROFESSORI SECTION -->
+        <section id="professori">
+            <h2>👨‍🏫 Gestione Professori</h2>
+            <div class="export-buttons">
+                <button class="btn btn-primary" onclick="apriModalProf()">➕ Aggiungi Professore</button>
+                <button class="btn btn-success" onclick="exportExcel('professori')">📊 Export Excel</button>
+                <input type="text" class="filter-input" placeholder="🔍 Cerca professore..." oninput="filtraProfessori()" style="margin-left:auto;">
+            </div>
+            <div class="table-container">
+                <table id="tabellaProfessori">
+                    <thead><tr><th>Nome</th><th>Materia</th><th>Scuola</th><th>Media Voti</th><th>Recensioni</th><th>Azioni</th></tr></thead>
+                    <tbody></tbody>
+                </table>
+            </div>
+        </section>
+
+        <section id="materie">
+            <h2>📘 Gestione Materie</h2>
+            <div class="filters-bar">
+                <input type="text" id="materiaNome" class="filter-input" placeholder="Nuova materia">
+                <button class="btn btn-primary" onclick="creaMateria()">➕ Aggiungi materia</button>
+                <button class="btn btn-info" onclick="caricaMaterie()">🔄 Aggiorna</button>
+            </div>
+            <div class="table-container">
+                <table id="tabellaMaterie"><thead><tr><th>ID</th><th>Nome</th><th>Azioni</th></tr></thead><tbody></tbody></table>
+            </div>
+        </section>
+
+        <section id="scuole">
+            <h2>🏫 Gestione Scuole</h2>
+            <div class="filters-bar">
+                <input type="text" id="scuolaNome" class="filter-input" placeholder="Nuova scuola">
+                <button class="btn btn-primary" onclick="creaScuola()">➕ Aggiungi scuola</button>
+                <button class="btn btn-info" onclick="caricaScuole()">🔄 Aggiorna</button>
+            </div>
+            <div class="table-container">
+                <table id="tabellaScuole"><thead><tr><th>ID</th><th>Nome</th><th>Azioni</th></tr></thead><tbody></tbody></table>
+            </div>
+        </section>
+        
+        <!-- UTENTI SECTION -->
+        <section id="utenti">
+            <h2>👥 Gestione Utenti</h2>
+            <div class="export-buttons">
+                <button class="btn btn-primary" onclick="apriModalUtente()">➕ Nuovo Utente</button>
+                <input type="text" class="filter-input" placeholder="🔍 Cerca utente..." oninput="filtraUtenti()" style="margin-left:auto;">
+            </div>
+            <div class="table-container">
+                <table id="tabellaUtenti">
+                    <thead><tr><th>Username</th><th>Ruolo</th><th>Stato</th><th>Data Reg.</th><th>Voti</th><th>Rec.</th><th>Azioni</th></tr></thead>
+                    <tbody></tbody>
+                </table>
+            </div>
+        </section>
+
+        <section id="ruoli">
+            <h2>🪪 Gestione Ruoli</h2>
+            <div class="filters-bar">
+                <input type="text" id="ruoloNome" class="filter-input" placeholder="Nuovo ruolo (es. moderatore)">
+                <button class="btn btn-primary" onclick="creaRuolo()">➕ Crea ruolo</button>
+                <button class="btn btn-info" onclick="caricaRuoli()">🔄 Aggiorna</button>
+            </div>
+            <div class="table-container">
+                <table id="tabellaRuoli"><thead><tr><th>ID</th><th>Ruolo</th><th>Sistema</th><th>Azioni</th></tr></thead><tbody></tbody></table>
+            </div>
+        </section>
+        
+        <!-- REGISTRAZIONI SECTION -->
+        <section id="registrazioni">
+            <h2>📋 Approvazione Registrazioni</h2>
+            <p style="color:#666; margin-bottom:20px;">Gestisci le richieste di nuovi utenti in attesa di approvazione.</p>
+            <div style="display:flex; gap:10px; margin-bottom:15px; flex-wrap:wrap;">
+                <button class="btn btn-primary" onclick="caricaRegistrazioni()">🔄 Aggiorna</button>
+                <button class="btn btn-success" onclick="approvaTutte()">✅ Approva Tutte</button>
+                <button class="btn btn-info" onclick="apriModalRegistrazioneAdmin()">➕ Crea registrazione per utente</button>
+                <span id="countRegistrazioni" class="badge badge-pending" style="display:none; align-self:center;">0 in attesa</span>
+            </div>
+            <div class="table-container">
+                <table id="tabellaRegistrazioni">
+                    <thead><tr><th>ID</th><th>Username</th><th>Email</th><th>Nome</th><th>Scuola</th><th>Data</th><th>Stato</th><th>Azioni</th></tr></thead>
+                    <tbody></tbody>
+                </table>
+            </div>
+        </section>
+        
+        <!-- TICKET SECTION -->
+        <section id="ticket">
+            <h2>🎫 Ticket Supporto</h2>
+            <p style="color:#666; margin-bottom:20px;">Gestisci le richieste di supporto. Usa i template per risposte rapide.</p>
+            
+            <!-- Quick Templates -->
+            <div style="margin-bottom:20px;">
+                <strong style="display:block; margin-bottom:10px;">📝 Template Risposte Rapide:</strong>
+                <div class="templates-grid">
+                    <div class="template-card" onclick="usaTemplate('Grazie per averci contattato. Il tuo ticket è stato preso in carico e riceverai una risposta entro 24 ore.')">
+                        <div class="title">✅ Presa in carico</div>
+                        <div class="preview">Grazie per averci contattato. Il tuo ticket è stato preso in carico...</div>
+                    </div>
+                    <div class="template-card" onclick="usaTemplate('Il problema è stato risolto. Se hai ancora difficoltà, non esitare a rispondere a questo messaggio.')">
+                        <div class="title">🔧 Problema risolto</div>
+                        <div class="preview">Il problema è stato risolto. Se hai ancora difficoltà...</div>
+                    </div>
+                    <div class="template-card" onclick="usaTemplate('Per procedere abbiamo bisogno di maggiori informazioni. Potresti fornire screenshot o dettagli aggiuntivi?')">
+                        <div class="title">❓ Richiesta info</div>
+                        <div class="preview">Per procedere abbiamo bisogno di maggiori informazioni...</div>
+                    </div>
+                    <div class="template-card" onclick="usaTemplate('Gentile utente, la tua richiesta non rientra nelle nostre competenze. Ti consigliamo di...')">
+                        <div class="title">📤 Reindirizzamento</div>
+                        <div class="preview">Gentile utente, la tua richiesta non rientra nelle nostre competenze...</div>
+                    </div>
+                </div>
+            </div>
+            
+            <div style="display:flex; gap:10px; margin-bottom:15px; flex-wrap:wrap;">
+                <button class="btn btn-primary" onclick="caricaTicketAdmin()">🔄 Aggiorna</button>
+                <button class="btn btn-success" onclick="apriModalTicketAdminCreate()">➕ Crea ticket per utente</button>
+                <select class="filter-select" onchange="filtraTicket()" style="min-width:150px;">
+                    <option value="">Tutti gli stati</option>
+                    <option value="aperto">🔵 Aperti</option>
+                    <option value="in_lavorazione">🟡 In lavorazione</option>
+                    <option value="risolto">🟢 Risolti</option>
+                </select>
+                <span id="countTicketAperti" class="badge badge-pending" style="display:none; align-self:center;">0 aperti</span>
+            </div>
+            <div class="table-container">
+                <table id="tabellaTicketAdmin">
+                    <thead><tr><th>ID</th><th>Utente</th><th>Oggetto</th><th>Priorità</th><th>Stato</th><th>Data</th><th>Azioni</th></tr></thead>
+                    <tbody></tbody>
+                </table>
+            </div>
+        </section>
+        
+        <!-- SESSIONI SECTION -->
+        <section id="sessioni">
+            <h2>🔐 Sessioni Attive</h2>
+            <p style="color:#666; margin-bottom:20px;">Monitora gli utenti loggati e termina sessioni sospette.</p>
+            <div style="display:flex; gap:10px; margin-bottom:15px; flex-wrap:wrap;">
+                <button class="btn btn-primary" onclick="caricaSessioni()">🔄 Aggiorna</button>
+                <button class="btn btn-danger" onclick="terminaTutteSessioni()">🚫 Termina Tutte (eccetto la tua)</button>
+            </div>
+            <div class="table-container">
+                <table id="tabellaSessioni">
+                    <thead><tr><th>Utente</th><th>IP</th><th>Login</th><th>Ultima Attività</th><th>Dispositivo</th><th>Azioni</th></tr></thead>
+                    <tbody></tbody>
+                </table>
+            </div>
+        </section>
+        
+        <!-- SEGNALAZIONI SECTION -->
+        <section id="segnalazioni">
+            <h2>🚩 Segnalazioni Utenti</h2>
+            <div style="display:flex; gap:10px; margin-bottom:15px; flex-wrap:wrap;">
+                <button class="btn btn-primary" onclick="caricaSegnalazioni()">🔄 Aggiorna</button>
+                <button class="btn btn-success" onclick="apriModalSegnalazioneAdmin()">➕ Crea segnalazione per utente</button>
+                <span id="countSegnalazioni" class="badge badge-admin" style="display:none; align-self:center;">0 nuove</span>
+            </div>
+            <div class="table-container">
+                <table id="tabellaSegnalazioni">
+                    <thead><tr><th>ID</th><th>Tipo</th><th>Segnalatore</th><th>Motivo</th><th>Data</th><th>Stato</th><th>Azioni</th></tr></thead>
+                    <tbody></tbody>
+                </table>
+            </div>
+        </section>
+        
+        <!-- AVVISI ADMIN -->
+        <section id="avvisi">
+            <h2>📣 Avvisi in homepage e dashboard utente</h2>
+            <p style="color:#666; margin-bottom:16px;">Gli avvisi attivi sono mostrati in home e nell’area utente fino alla data di scadenza (opzionale).</p>
+            <div class="filters-bar" style="margin-bottom:20px;">
+                <input type="text" id="avvisoTitolo" class="filter-input" placeholder="Titolo avviso">
+                <textarea id="avvisoContenuto" class="filter-input" style="min-width:260px; min-height:80px;" placeholder="Testo pubblico dell’avviso"></textarea>
+                <select id="avvisoPriorita" class="filter-select"><option value="normal">Priorità normale</option><option value="high">Alta priorità</option></select>
+                <input type="datetime-local" id="avvisoScadenza" class="filter-input" style="min-width:220px;">
+                <button type="button" class="btn btn-primary" onclick="pubblicaNuovoAvviso()">➕ Pubblica avviso</button>
+                <button type="button" class="btn btn-info" onclick="caricaAvvisiAdmin()">🔄 Aggiorna elenco</button>
+            </div>
+            <div class="table-container">
+                <table id="tabellaAvvisi">
+                    <thead><tr><th>ID</th><th>Titolo</th><th>Attivo</th><th>Priorità</th><th>Creato</th><th>Scadenza</th><th>Azioni</th></tr></thead>
+                    <tbody></tbody>
+                </table>
+            </div>
+        </section>
+
+        <section id="global_banner">
+            <h2>📢 Banner Globale</h2>
+            <p style="color:#666; margin-bottom:16px;">Messaggio mostrato in cima a tutte le pagine.</p>
+            <div class="filters-bar">
+                <textarea id="bannerMessaggio" class="filter-input" style="min-width:340px; min-height:80px;" placeholder="Es: Manutenzione prevista domani dalle 21:00 alle 22:00"></textarea>
+                <label style="display:flex;align-items:center;gap:8px;"><input type="checkbox" id="bannerAttivo"> Banner attivo</label>
+                <button class="btn btn-primary" onclick="salvaBannerGlobale()">💾 Salva banner</button>
+                <button class="btn btn-info" onclick="caricaBannerGlobale()">🔄 Aggiorna</button>
+            </div>
+            <div id="bannerInfo" style="color:#666;font-size:13px;"></div>
+        </section>
+
+        <section id="ip_ban">
+            <h2>🛡️ Gestione IP Ban</h2>
+            <div class="filters-bar">
+                <input id="ipBanInput" class="filter-input" type="text" placeholder="IP da bloccare (es. 192.168.1.5)">
+                <input id="ipBanMotivo" class="filter-input" type="text" placeholder="Motivo (opzionale)">
+                <button class="btn btn-danger" onclick="aggiungiIpBan()">⛔ Blocca IP</button>
+                <button class="btn btn-info" onclick="caricaIpBan()">🔄 Aggiorna</button>
+            </div>
+            <div class="table-container">
+                <table id="tabellaIpBan">
+                    <thead><tr><th>ID</th><th>IP</th><th>Motivo</th><th>Creato</th><th>Admin</th><th>Azioni</th></tr></thead>
+                    <tbody></tbody>
+                </table>
+            </div>
+        </section>
+
+        <section id="newsletter">
+            <h2>✉️ Newsletter / Avvisi Email</h2>
+            <p style="color:#666; margin-bottom:16px;">Invia una comunicazione massiva via email.</p>
+            <div class="filters-bar">
+                <input id="newsSubject" class="filter-input" type="text" placeholder="Oggetto email">
+                <label style="display:flex;align-items:center;gap:8px;"><input type="checkbox" id="newsAncheAdmin"> Includi admin</label>
+            </div>
+            <textarea id="newsHtml" class="filter-input" style="width:100%; min-height:180px;" placeholder="Corpo HTML email..."></textarea>
+            <div style="margin-top:12px;display:flex;gap:10px;">
+                <button class="btn btn-primary" onclick="inviaNewsletter()">📨 Invia newsletter</button>
+            </div>
+        </section>
+
+        <section id="ticket_templates">
+            <h2>🧩 Template Ticket</h2>
+            <div class="filters-bar">
+                <input id="tplNome" class="filter-input" type="text" placeholder="Nome template">
+                <input id="tplOggetto" class="filter-input" type="text" placeholder="Oggetto suggerito">
+                <input id="tplTipo" class="filter-input" type="text" placeholder="Tipo (es. tecnico)">
+                <button class="btn btn-primary" onclick="creaTemplateTicket()">➕ Crea template</button>
+                <button class="btn btn-info" onclick="caricaTemplateTicket()">🔄 Aggiorna</button>
+            </div>
+            <textarea id="tplCorpo" class="filter-input" style="width:100%; min-height:120px;" placeholder="Testo del template..."></textarea>
+            <div class="table-container" style="margin-top:16px;">
+                <table id="tabellaTicketTemplates">
+                    <thead><tr><th>ID</th><th>Nome</th><th>Oggetto</th><th>Tipo</th><th>Corpo</th><th>Azioni</th></tr></thead>
+                    <tbody></tbody>
+                </table>
+            </div>
+        </section>
+
+        <section id="privacy_rgpd">
+            <h2>🔒 Richieste cancellazione dati (GDPR)</h2>
+            <p style="color:#666; margin-bottom:16px;">Gli utenti possono richiedere la rimozione dal pannello personale.</p>
+            <div style="display:flex;gap:10px;margin-bottom:10px;flex-wrap:wrap;">
+                <button type="button" class="btn btn-primary" onclick="caricaPrivacyAdmin()">🔄 Aggiorna</button>
+                <button type="button" class="btn btn-success" onclick="apriModalPrivacyAdmin()">➕ Crea richiesta per utente</button>
+            </div>
+            <div class="table-container" style="margin-top:16px;">
+                <table id="tabellaPrivacy">
+                    <thead><tr><th>ID</th><th>Utente</th><th>Motivo</th><th>Stato</th><th>Data</th><th>Azioni</th></tr></thead>
+                    <tbody></tbody>
+                </table>
+            </div>
+        </section>
+
+        <section id="danger_reset">
+            <h2>⚠️ Reset Sistema (Area Pericolosa)</h2>
+            <p style="color:#b71c1c;font-weight:600;">Operazione irreversibile. Solo founder.</p>
+            <div class="filters-bar">
+                <input type="password" id="dangerResetPwd" class="filter-input" placeholder="Password sicurezza">
+                <input type="text" id="dangerResetConfirm" class="filter-input" placeholder='Scrivi esattamente: RESET-SYSTEM'>
+                <button class="btn btn-danger" onclick="eseguiResetSistema()">🔥 Esegui reset</button>
+            </div>
+        </section>
+
+        <!-- LOG ATTIVITÀ SECTION (NUOVO) -->
+        <section id="log">
+            <h2>📜 Log Attività</h2>
+            <p style="color:#666; margin-bottom:20px;">Monitora le ultime azioni compiute nel sistema.</p>
+            <div style="display:flex; gap:10px; margin-bottom:15px; flex-wrap:wrap;">
+                <button class="btn btn-primary" onclick="caricaLog()">🔄 Aggiorna</button>
+                <button class="btn btn-success" onclick="exportExcel('log')">📊 Export Excel</button>
+                <select class="filter-select" onchange="filtraLog()" style="min-width:150px;">
+                    <option value="">Tutti i tipi</option>
+                    <option value="admin">👑 Admin</option>
+                    <option value="user">👤 Utente</option>
+                    <option value="sistema">⚙️ Sistema</option>
+                </select>
+            </div>
+            <div id="listaLog" style="max-height:500px; overflow-y:auto;"></div>
+        </section>
+        
+        <!-- IMPOSTAZIONI SECTION (NUOVO) -->
+        <section id="impostazioni">
+            <h2>⚙️ Impostazioni Sistema</h2>
+            
+            <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap:25px;">
+                <!-- Backup -->
+                <div class="anagrafica-card">
+                    <h4>💾 Backup Database</h4>
+                    <p style="color:#666; font-size:14px; margin-bottom:15px;">Scarica una copia completa dei dati del sistema.</p>
+                    <button class="btn btn-warning" onclick="eseguiBackup()" style="width:100%;">📦 Esegui Backup Completo</button>
+                    <p style="font-size:12px; color:#999; margin-top:10px;">Ultimo backup: <strong id="lastBackup">-</strong></p>
+                </div>
+                
+                <!-- Notifiche Push -->
+                <div class="anagrafica-card">
+                    <h4>📢 Notifiche Push</h4>
+                    <p style="color:#666; font-size:14px; margin-bottom:15px;">Invia avvisi a tutti gli utenti registrati.</p>
+                    <button class="btn btn-primary" onclick="apriPushModal()" style="width:100%;">✉️ Nuova Notifica Push</button>
+                    <p style="font-size:12px; color:#999; margin-top:10px;">Ultima notifica: <strong id="lastPush">-</strong></p>
+                </div>
+                
+                <!-- Dark Mode -->
+                <div class="anagrafica-card">
+                    <h4>🌙 Tema Interfaccia</h4>
+                    <p style="color:#666; font-size:14px; margin-bottom:15px;">Personalizza l'aspetto della dashboard.</p>
+                    <button class="btn btn-secondary" onclick="toggleDarkMode()" style="width:100%;" id="btnDarkMode">
+                        <span id="darkModeLabel">Attiva Dark Mode</span>
+                    </button>
+                </div>
+                
+                <!-- Manutenzione -->
+                <div class="anagrafica-card">
+                    <h4>🔧 Manutenzione</h4>
+                    <p style="color:#666; font-size:14px; margin-bottom:15px;">Strumenti per la manutenzione del sistema.</p>
+                    <button class="btn btn-info" onclick="pulisciCache()" style="width:100%; margin-bottom:10px;">🧹 Pulisci Cache</button>
+                    <button class="btn btn-danger" onclick="ottimizzaDatabase()" style="width:100%;">⚡ Ottimizza Database</button>
+                </div>
+            </div>
+        </section>
+    </main>
+</div>
+
+<!-- ================= MODALS ================= -->
+
+<!-- Modal Aggiungi/Modifica Voto -->
+<div class="modal" id="modalVoto">
+    <div class="modal-content">
+        <h3 id="titoloModalVoto">➕ Aggiungi Voto</h3>
+        <label style="display:block; text-align:left; font-size:13px; margin:10px 0 5px; color:#555;">Utente</label>
+        <select id="formVotoUtente">
+            <option value="">Seleziona utente...</option>
+        </select>
+        <label style="display:block; text-align:left; font-size:13px; margin:10px 0 5px; color:#555;">Professore (da elenco)</label>
+        <select id="formVotoProf">
+            <option value="">Seleziona professore...</option>
+        </select>
+        <label style="display:block; text-align:left; font-size:13px; margin:10px 0 5px; color:#555;">O nome professore libero</label>
+        <input type="text" id="formNomeProfLibero" placeholder="Es: Rossi Alessandro">
+        <label style="display:block; text-align:left; font-size:13px; margin:10px 0 5px; color:#555;">Materia</label>
+        <select id="formVotoMateria">
+            <option value="">Seleziona materia...</option>
+            <option>Matematica</option>
+            <option>Italiano</option>
+            <option>Storia</option>
+            <option>Inglese</option>
+            <option>Fisica</option>
+            <option>Chimica</option>
+        </select>
+        <label style="display:block; text-align:left; font-size:13px; margin:10px 0 5px; color:#555;">Scuola</label>
+        <select id="formVotoScuola">
+            <option value="">Seleziona scuola...</option>
+            <option>Liceo Scientifico</option>
+            <option>Liceo Classico</option>
+            <option>Istituto Tecnico</option>
+            <option>Istituto Professionale</option>
+        </select>
+        <label style="display:block; text-align:left; font-size:13px; margin:10px 0 5px; color:#555;">Anno Scolastico</label>
+        <select id="formVotoAnno">
+            <option>2024/2025</option>
+            <option>2023/2024</option>
+            <option>2022/2023</option>
+        </select>
+        <label style="display:block; text-align:left; font-size:13px; margin:10px 0 5px; color:#555;">Voto (1-10)</label>
+        <input type="number" id="formVotoValore" placeholder="Inserisci voto" min="1" max="10">
+        <label style="display:block; text-align:left; font-size:13px; margin:10px 0 5px; color:#555;">Note (opzionale)</label>
+        <textarea id="formVotoNote" placeholder="Note aggiuntive..."></textarea>
+        <div class="btn-group">
+            <button class="btn btn-danger" onclick="chiudiModalVoto()">Annulla</button>
+            <button class="btn btn-success" onclick="salvaVoto()">💾 Salva</button>
+        </div>
+    </div>
+</div>
+
+<!-- Modal Modifica Credenziali Utente -->
+<div class="modal" id="modalCredenziali">
+    <div class="modal-content">
+        <h3>✏️ Modifica Credenziali</h3>
+        <p style="color:#666; margin-bottom:15px; font-size:14px;">Utente: <strong id="credUsernameCorrente"></strong></p>
+        <label style="display:block; text-align:left; font-size:13px; margin:10px 0 5px; color:#555;">Nuovo Username</label>
+        <input type="text" id="formNuovoUsername" placeholder="Lascia vuoto per non cambiare">
+        <label style="display:block; text-align:left; font-size:13px; margin:10px 0 5px; color:#555;">Nuova Password</label>
+        <input type="password" id="formNuovaPassword" placeholder="Lascia vuoto per non cambiare">
+        <div class="btn-group">
+            <button class="btn btn-danger" onclick="chiudiModalCredenziali()">Annulla</button>
+            <button class="btn btn-success" onclick="salvaCredenzialiUtente()">Salva</button>
+        </div>
+    </div>
+</div>
+
+<!-- Modal Scheda Anagrafica Utente -->
+<div class="modal" id="modalAnagrafica">
+    <div class="modal-content large">
+        <h3>📋 Scheda Anagrafica</h3>
+        <div id="anagraficaContent"></div>
+        <div class="btn-group">
+            <button class="btn btn-secondary" onclick="chiudiModalAnagrafica()">Chiudi</button>
+        </div>
+    </div>
+</div>
+
+<!-- Modal Ticket Admin -->
+<div class="modal" id="modalTicketAdmin">
+    <div class="modal-content" style="max-width: 700px;">
+        <h3 id="ticketAdminTitolo">🎫 Dettaglio Ticket</h3>
+        <div id="ticketAdminInfo" style="margin: 20px 0; padding: 20px; background: #f5f7fa; border-radius: 10px;"></div>
+        <div id="ticketAdminRisposte" style="margin: 20px 0; max-height: 300px; overflow-y: auto;"></div>
+        <div style="margin-top: 20px; padding-top: 20px; border-top: 2px solid #e0e0e0;">
+            <h4 style="margin: 0 0 15px 0;">💬 Rispondi</h4>
+            <textarea id="ticketAdminRisposta" placeholder="Scrivi la tua risposta..." style="width:100%; padding:12px; border:2px solid #e0e0e0; border-radius:10px; font-size:14px; min-height:100px;"></textarea>
+            <select id="ticketAdminStato" style="margin-top:10px;">
+                <option value="aperto">🔵 Aperto</option>
+                <option value="in_lavorazione">🟡 In lavorazione</option>
+                <option value="risolto">🟢 Risolto</option>
+                <option value="chiuso">⚫ Chiuso</option>
+            </select>
+            <div class="btn-group" style="margin-top:15px;">
+                <button class="btn btn-secondary" onclick="chiudiTicketAdmin()">Chiudi</button>
+                <button class="btn btn-success" onclick="rispondiTicketAdmin()">💬 Invia</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Modal Push Notification -->
+<div class="modal" id="modalPush">
+    <div class="modal-content large">
+        <h3>📢 Nuova Notifica Push</h3>
+        <div class="push-form">
+            <div class="form-row">
+                <div>
+                    <label>Titolo</label>
+                    <input type="text" id="pushTitolo" placeholder="Es: Manutenzione programmata">
+                </div>
+                <div>
+                    <label>Tipo</label>
+                    <select id="pushTipo">
+                        <option value="sistema">⚙️ Sistema</option>
+                        <option value="avviso">⚠️ Avviso</option>
+                        <option value="promozione">🎉 Promozione</option>
+                        <option value="urgente">🚨 Urgente</option>
+                    </select>
+                </div>
+            </div>
+            <label>Messaggio</label>
+            <textarea id="pushMessaggio" placeholder="Scrivi il messaggio della notifica..." style="min-height:120px;"></textarea>
+            <div class="form-row">
+                <div>
+                    <label>Destinatari</label>
+                    <select id="pushDestinatari">
+                        <option value="tutti">👥 Tutti gli utenti</option>
+                        <option value="studenti">🎓 Solo studenti</option>
+                        <option value="professori">👨‍🏫 Solo professori</option>
+                        <option value="admin">👑 Solo admin</option>
+                    </select>
+                </div>
+                <div>
+                    <label>Programma (opzionale)</label>
+                    <input type="datetime-local" id="pushProgramma">
+                </div>
+            </div>
+        </div>
+        <div class="btn-group">
+            <button class="btn btn-danger" onclick="chiudiPushModal()">Annulla</button>
+            <button class="btn btn-primary" onclick="inviaPush()">📤 Invia Notifica</button>
+        </div>
+    </div>
+</div>
+
+<!-- Modal Aggiungi/Modifica professore -->
+<div class="modal" id="modalProfessoreWrap">
+    <div class="modal-content">
+        <h3 id="titoloModalProf">👨‍🏫 Professore</h3>
+        <label>Nome</label><input type="text" id="formProfNome">
+        <label>Materia</label><input type="text" id="formProfMateria">
+        <label>Scuola</label><input type="text" id="formProfScuola">
+        <label>Descrizione (opzionale)</label><textarea id="formProfDescrizione" style="min-height:72px;"></textarea>
+        <div class="btn-group">
+            <button type="button" class="btn btn-danger" onclick="chiudiProfModal()">Chiudi</button>
+            <button type="button" class="btn btn-success" onclick="salvaProfessoreDashboard()">💾 Salva</button>
+        </div>
+    </div>
+</div>
+
+<!-- Modal Nuovo Utente -->
+<div class="modal" id="modalNuovoUtente">
+    <div class="modal-content">
+        <h3>➕ Nuovo utente</h3>
+        <label>Username</label><input type="text" id="nuovoUtUsername" autocomplete="off">
+        <label>Password</label><input type="password" id="nuovoUtPassword" autocomplete="new-password">
+        <label>Ruolo</label>
+        <select id="nuovoUtRuolo"><option value="user">user</option><option value="admin">admin</option></select>
+        <div class="btn-group">
+            <button type="button" class="btn btn-secondary" onclick="chiudiModalNuovoUtente()">Annulla</button>
+            <button type="button" class="btn btn-success" onclick="creaNuovoUtenteDashboard()">Crea</button>
+        </div>
+    </div>
+</div>
+
+<div class="modal" id="modalRecensioneAdmin">
+    <div class="modal-content">
+        <h3>➕ Recensione per conto utente</h3>
+        <input type="text" id="recAdminUsername" placeholder="Username utente">
+        <input type="text" id="recAdminProf" placeholder="Professore">
+        <input type="text" id="recAdminScuola" placeholder="Scuola">
+        <textarea id="recAdminTesto" placeholder="Testo recensione"></textarea>
+        <label><input type="checkbox" id="recAdminAnon"> Pubblica anonima</label>
+        <div class="btn-group">
+            <button type="button" class="btn btn-secondary" onclick="chiudiModalRecensioneAdmin()">Annulla</button>
+            <button type="button" class="btn btn-success" onclick="creaRecensioneAdmin()">Salva</button>
+        </div>
+    </div>
+</div>
+
+<div class="modal" id="modalRegistrazioneAdmin">
+    <div class="modal-content">
+        <h3>➕ Registrazione per conto utente</h3>
+        <input type="text" id="regAdminUsername" placeholder="Username">
+        <input type="password" id="regAdminPassword" placeholder="Password">
+        <input type="email" id="regAdminEmail" placeholder="Email">
+        <input type="text" id="regAdminNome" placeholder="Nome e cognome">
+        <input type="text" id="regAdminScuola" placeholder="Scuola">
+        <div class="btn-group">
+            <button type="button" class="btn btn-secondary" onclick="chiudiModalRegistrazioneAdmin()">Annulla</button>
+            <button type="button" class="btn btn-success" onclick="creaRegistrazioneAdmin()">Crea</button>
+        </div>
+    </div>
+</div>
+
+<div class="modal" id="modalTicketAdminCreate">
+    <div class="modal-content">
+        <h3>➕ Ticket per conto utente</h3>
+        <input type="text" id="tktAdminUser" placeholder="Username utente">
+        <input type="text" id="tktAdminOggetto" placeholder="Oggetto">
+        <textarea id="tktAdminMsg" placeholder="Messaggio"></textarea>
+        <select id="tktAdminPriorita"><option value="bassa">bassa</option><option value="media" selected>media</option><option value="alta">alta</option><option value="urgente">urgente</option></select>
+        <div class="btn-group">
+            <button type="button" class="btn btn-secondary" onclick="chiudiModalTicketAdminCreate()">Annulla</button>
+            <button type="button" class="btn btn-success" onclick="creaTicketAdminPerUtente()">Crea</button>
+        </div>
+    </div>
+</div>
+
+<div class="modal" id="modalSegnalazioneAdmin">
+    <div class="modal-content">
+        <h3>➕ Segnalazione per conto utente</h3>
+        <input type="text" id="segAdminSegnalatore" placeholder="Username segnalatore">
+        <input type="text" id="segAdminTipo" placeholder="Tipo (voto/recensione/commento)">
+        <input type="number" id="segAdminIndice" placeholder="Indice target (id)">
+        <textarea id="segAdminMotivo" placeholder="Motivo"></textarea>
+        <div class="btn-group">
+            <button type="button" class="btn btn-secondary" onclick="chiudiModalSegnalazioneAdmin()">Annulla</button>
+            <button type="button" class="btn btn-success" onclick="creaSegnalazioneAdmin()">Crea</button>
+        </div>
+    </div>
+</div>
+
+<div class="modal" id="modalPrivacyAdminCreate">
+    <div class="modal-content">
+        <h3>➕ Richiesta cancellazione per utente</h3>
+        <input type="text" id="privacyAdminUser" placeholder="Username">
+        <textarea id="privacyAdminMotivo" placeholder="Motivo richiesta"></textarea>
+        <div class="btn-group">
+            <button type="button" class="btn btn-secondary" onclick="chiudiModalPrivacyAdmin()">Annulla</button>
+            <button type="button" class="btn btn-success" onclick="creaRichiestaPrivacyAdmin()">Crea</button>
+        </div>
+    </div>
+</div>
+
+<!-- Modal Chat Widget -->
+<div class="chat-widget" id="chatWidget">
+    <div class="chat-header" onclick="toggleChat()">
+        <span>💬 Chat Supporto</span>
+        <span style="font-size:20px;">✕</span>
+    </div>
+    <div class="chat-body" id="chatBody">
+        <div class="chat-message admin">Ciao! 👋 Come posso aiutarti oggi?</div>
+    </div>
+    <div class="chat-footer">
+        <input type="text" id="chatInput" placeholder="Scrivi un messaggio..." onkeypress="if(event.key==='Enter') inviaChat()">
+        <button class="btn btn-primary btn-sm" onclick="inviaChat()">➤</button>
+    </div>
+</div>
+
+<!-- Toast Notification -->
+<div id="toast"></div>
+
+<script>window.__ADMIN_USER__ = {{ username|tojson }};</script>
+<script src="{{ url_for('static', filename='admin-panel.js') }}"></script>
+
+</body>
+</html>
