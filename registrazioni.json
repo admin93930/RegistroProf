@@ -1,0 +1,24 @@
+[
+    {
+        "id": 1,
+        "username": "testandrea",
+        "password": "pbkdf2:sha256:1000000$FdKnvK0X6FG3PJqT$f71242a9b8f4bb8e8a672617615fb882e690f616b66365f29c2dc9adfaeba037",
+        "email": "aanastasi@scuola-borsa.it",
+        "nome_cognome": "prova andrea",
+        "scuola": "borsa monza",
+        "data_registrazione": "2026-04-11 12:10:18",
+        "stato": "in_attesa",
+        "admin_note": ""
+    },
+    {
+        "id": 2,
+        "username": "prova",
+        "password": "pbkdf2:sha256:1000000$q21kWy772H8TvCee$3da7893476195a1f03201b30cb060a62be0024f8be379f9d929592289fd1d930",
+        "email": "aanastasi@scuola-borsa.it",
+        "nome_cognome": "test",
+        "scuola": "test",
+        "data_registrazione": "2026-04-17 09:27:53",
+        "stato": "in_attesa",
+        "admin_note": ""
+    }
+]

@@ -1,0 +1,118 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Registrati - Registro Professori</title>
+    <style>
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; margin: 0; padding: 0; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); min-height: 100vh; display: flex; justify-content: center; align-items: center; }
+        .container { background: white; padding: 40px; border-radius: 20px; box-shadow: 0 25px 50px rgba(0,0,0,0.25); width: 90%; max-width: 500px; }
+        h1 { color: #333; text-align: center; margin: 0 0 10px 0; font-size: 28px; }
+        .subtitle { color: #666; text-align: center; margin-bottom: 30px; font-size: 14px; }
+        .form-group { margin-bottom: 20px; }
+        label { display: block; margin-bottom: 8px; color: #333; font-weight: 600; font-size: 14px; }
+        input[type="text"], input[type="password"], input[type="email"] { width: 100%; padding: 12px 16px; border: 2px solid #e0e0e0; border-radius: 10px; font-size: 14px; transition: 0.3s; box-sizing: border-box; }
+        input:focus { outline: none; border-color: #667eea; box-shadow: 0 0 0 3px rgba(102,126,234,0.1); }
+        .captcha-group { background: #f5f7fa; padding: 15px; border-radius: 10px; margin-bottom: 20px; }
+        .captcha-domanda { font-size: 18px; font-weight: bold; color: #667eea; text-align: center; margin-bottom: 10px; }
+        .btn { width: 100%; padding: 14px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; border: none; border-radius: 10px; font-size: 16px; font-weight: 600; cursor: pointer; transition: 0.3s; }
+        .btn:hover { transform: translateY(-2px); box-shadow: 0 10px 25px rgba(102,126,234,0.4); }
+        .login-link { text-align: center; margin-top: 20px; color: #666; }
+        .login-link a { color: #667eea; text-decoration: none; font-weight: 600; }
+        .login-link a:hover { text-decoration: underline; }
+        .error-box { background: #ffebee; color: #c62828; padding: 15px; border-radius: 10px; margin-bottom: 20px; }
+        .error-box ul { margin: 5px 0 0 20px; padding: 0; }
+        .success-box { background: #e8f5e9; color: #2e7d32; padding: 15px; border-radius: 10px; margin-bottom: 20px; }
+        .required { color: #f44336; }
+        .home-btn {
+    display: inline-block;
+    padding: 8px 14px;
+    background: linear-gradient(135deg, #764ba2 0%, #667eea 100%);
+    color: white;
+    text-decoration: none;
+    border-radius: 20px;
+    font-size: 13px;
+    font-weight: 600;
+    transition: 0.3s;
+    box-shadow: 0 4px 10px rgba(0,0,0,0.15);
+}
+
+.home-btn:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 8px 18px rgba(0,0,0,0.25);
+}
+    </style>
+</head>
+<body>
+    {% if site_banner and site_banner.attivo and site_banner.messaggio %}
+    <div style="background:#1a237e;color:#fff;padding:10px;text-align:center;font-size:13px;margin-bottom:10px;">{{ site_banner.messaggio }}</div>
+    {% endif %}
+    <a href="/home" class="home-btn">🏠 Home</a>
+    <div class="container">
+        <h1>📝 Registrati</h1>
+        <p class="subtitle">Crea il tuo account per accedere al registro</p>
+        
+        {% if errori %}
+        <div class="error-box">
+            <strong>⚠️ Errori nella registrazione:</strong>
+            <ul>
+                {% for errore in errori %}
+                <li>{{ errore }}</li>
+                {% endfor %}
+            </ul>
+        </div>
+        {% endif %}
+        
+        {% if successo %}
+        <div class="success-box">
+            <strong>{{ successo }}</strong><br><br>
+            <a href="/login" style="color: #2e7d32; font-weight: 600;">Vai al Login →</a>
+        </div>
+        {% endif %}
+        
+        <form method="POST" action="/registrazione">
+            <div class="form-group">
+                <label>Username <span class="required">*</span  ></label>
+                <input type="text" name="username" value="{{ dati_inviati.username if dati_inviati else '' }}" required minlength="3" placeholder="Scegli un username">
+            </div>
+            
+            <div class="form-group">
+                <label>Email <span class="required">*</span></label>
+                <input type="email" name="email" value="{{ dati_inviati.email if dati_inviati else '' }}" required placeholder="tua@email.com">
+            </div>
+            
+            <div class="form-group">
+                <label>Nome e Cognome <span class="required">*</span></label>
+                <input type="text" name="nome_cognome" value="{{ dati_inviati.nome_cognome if dati_inviati else '' }}" required placeholder="Mario Rossi">
+            </div>
+            
+            <div class="form-group">
+                <label>Scuola di appartenenza <span class="required">*</span></label>
+                <input type="text" name="scuola" value="{{ dati_inviati.scuola if dati_inviati else '' }}" required placeholder="Es. Liceo Scientifico">
+            </div>
+            
+            <div class="form-group">
+                <label>Password <span class="required">*</span></label>
+                <input type="password" name="password" required minlength="4" placeholder="Minimo 4 caratteri">
+            </div>
+            
+            <div class="form-group">
+                <label>Conferma Password <span class="required">*</span></label>
+                <input type="password" name="conferma_password" required minlength="4" placeholder="Ripeti la password">
+            </div>
+            
+            <div class="captcha-group">
+                <div class="captcha-domanda">🔒 {{ captcha_domanda }}</div>
+                <input type="text" name="captcha_risposta" required placeholder="Inserisci il risultato" style="text-align: center; font-size: 16px; font-weight: bold;">
+            </div>
+            
+            <button type="submit" class="btn">🔐 Registrati</button>
+        </form>
+        
+        <div class="login-link">
+            Hai già un account? <a href="/login">Accedi qui</a>
+        </div>
+        <p class="login-link" style="margin-top:14px;">Prima di registrarti leggi l'<a href="{{ url_for('privacy_informativa') }}">Informativa sulla privacy</a>.</p>
+    </div>
+</body>
+</html>

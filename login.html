@@ -1,0 +1,206 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Pagina di Accesso</title>
+    <link rel="stylesheet" href="/static/stili.css">
+    <style>
+        /* styles.css */
+
+body {
+    font-family: Arial, sans-serif;
+    background-color: #f0f0f0;
+    margin: 0;
+    padding: 0;
+}
+
+.container {
+    width: 500px;
+    margin: 0 auto;
+    padding: 20px;
+    border: 1px solid #ccc;
+    border-radius: 5px;
+    box-shadow: 0 2px 5px rgba(0, 0, 0, 0.3);
+}
+
+h1 {
+    text-align: center;
+    margin-bottom: 20px;
+}
+
+.input-group {
+    margin-bottom: 10px;
+}
+
+label {
+    display: block;
+    margin-bottom: 5px;
+}
+
+input {
+    width: 100%;
+    padding: 8px;
+    border: 1px solid #ccc;
+    border-radius: 5px;
+}
+
+button {
+    background-color: #4CAF50;
+    color: white;
+    padding: 10px 20px;
+    border: none;
+    border-radius: 5px;
+    cursor: pointer;
+}
+
+button:hover {
+    background-color: #3e8e41;
+}
+.container h1 {
+    text-align: center;
+    margin-bottom: 50px;
+  }
+    
+        /* Stili per il messaggio di cookie con dimensioni più piccole */
+        .cookie-banner {
+            position: fixed;
+            bottom: 0;
+            left: 0;
+            width: 100%;
+            background-color: #333;
+            color: white;
+            text-align: center;
+            padding: 5px; /* Ridotto il padding */
+            font-size: 12px; /* Ridotto la dimensione del testo */
+            display: none;
+        }
+        .cookie-banner button {
+            background-color: #4CAF50;
+            color: white;
+            border: none;
+            padding: 3px 15px; /* Ridotto il padding dei bottoni */
+            font-size: 12px; /* Ridotta la dimensione del font dei bottoni */
+            cursor: pointer;
+            margin: 0 5px;
+        }
+        .cookie-banner button.reject {
+            background-color: #f44336;
+        }
+        /* Stile per il bottone "Vai alla Home" */
+.cta-button {
+    display: inline-block;
+    margin: 10px 0;
+    padding: 10px 20px;
+    background-color: #007bff; /* Blu intenso */
+    color: white;
+    text-decoration: none;
+    border-radius: 5px;
+    font-size: 16px;
+    font-weight: bold;
+    text-align: center;
+    border: 2px solid #007bff; /* Bordo blu */
+    transition: all 0.3s ease; /* Transizione fluida */
+}
+
+.cta-button:hover {
+    background-color: #0056b3; /* Blu più scuro */
+    border-color: #0056b3; /* Cambia il bordo quando si passa sopra */
+    cursor: pointer;
+}
+
+.cta-button:focus {
+    outline: none; /* Rimuove la bordatura di focus */
+    box-shadow: 0 0 5px rgba(0, 123, 255, 0.5); /* Aggiunge un'ombra blu al focus */
+}
+
+    </style>
+</head>
+<body>
+    {% if site_banner and site_banner.attivo and site_banner.messaggio %}
+    <div style="background:#1a237e;color:#fff;padding:10px;text-align:center;font-size:13px;">{{ site_banner.messaggio }}</div>
+    {% endif %}
+    <!-- Aggiungi questo blocco dove vuoi il bottone nella tua pagina login.html -->
+<div class="input-group">
+    <a href="/">
+        <button type="button" class="cta-button">Vai alla Home</button>
+    </a>
+</div>
+
+    <div class="container">
+        <h1>Benvenuto nel registro</h1> 
+        <h1>"Scuola Paolo Borsa Monza"</h1>
+        {% if error %}<p style="color:#c62828; font-weight:bold;">{{ error }}</p>{% endif %}
+        {% if info %}<p style="color:#1565c0; font-weight:bold;">{{ info }}</p>{% endif %}
+        {% if need_otp %}
+        <form action="/login" method="post">
+            <input type="hidden" name="otp_mode" value="1">
+            <div class="input-group">
+                <label for="otp_code">Codice OTP (admin)</label>
+                <input type="text" id="otp_code" name="otp_code" minlength="6" maxlength="6" required placeholder="Inserisci codice ricevuto via email">
+            </div>
+            <button type="submit">Verifica OTP</button>
+        </form>
+        {% else %}
+        <form action="/login" method="post">
+            <div class="input-group">
+                <label for="username">Nome Utente</label>
+                <input type="text" id="username" name="username" required>
+            </div>
+            <div class="input-group">
+                <label for="password">Password</label>
+                <input type="password" id="password" name="password" required>
+            </div>
+            <button type="submit">Accedi</button>
+        </form>
+        {% endif %}
+        <p style="text-align:center; margin-top:12px;"><a href="{{ url_for('recupero_password') }}">Password dimenticata?</a></p>
+        <p style="text-align:center; margin-top:8px; font-size:13px;">
+            <a href="{{ url_for('privacy_informativa') }}">Informativa sulla privacy</a>
+        </p>
+        {% if oauth_google_ok or oauth_ms_ok or oauth_fb_ok %}
+        <p style="text-align:center; margin-top:10px; font-size:13px;">
+            {% if oauth_google_ok %}<a href="{{ url_for('oauth_google_start') }}">Accedi con Google</a>{% endif %}
+            {% if oauth_ms_ok %} · <a href="{{ url_for('oauth_microsoft_start') }}">Microsoft</a>{% endif %}
+            {% if oauth_fb_ok %} · <a href="{{ url_for('oauth_facebook_start') }}">Facebook</a>{% endif %}
+        </p>
+        {% endif %}
+    </div>
+
+    <div class="container">
+        <h2>Guida al login</h2>
+        <p>Per effettuare l'accesso occorre essere Registrati, una volta ottenute le credenziali di accesso si inserisce nome utente e password, e si clicca sul pulsante accedi</p>
+        <p>Per contattarci, scrivi a <a href="mailto:anastasiandrea82@gmail.com">anastasiandrea82@gmail.com</a>.</p>
+    </div>
+
+    <footer>
+        <p>&copy; 2024 Registro dei Prof di Andrea Anastasi. Tutti i diritti riservati.</p>
+    </footer>
+
+    <!-- Barra dei cookie -->
+    <div class="cookie-banner" id="cookie-banner">
+        <p>Questo sito utilizza i cookie per migliorare l'esperienza utente. Accetti l'uso dei cookie?</p>
+        <button id="accept-cookies">Accetta</button>
+        <button id="reject-cookies" class="reject">Rifiuta</button>
+    </div>
+
+    <script>
+        // Mostra la barra dei cookie se l'utente non ha ancora accettato o rifiutato
+        if (!localStorage.getItem('cookiesAccepted')) {
+            document.getElementById('cookie-banner').style.display = 'block';
+        }
+
+        // Gestisce il click sul pulsante "Accetta"
+        document.getElementById('accept-cookies').addEventListener('click', function() {
+            localStorage.setItem('cookiesAccepted', 'true');
+            document.getElementById('cookie-banner').style.display = 'none';
+        });
+
+        // Gestisce il click sul pulsante "Rifiuta"
+        document.getElementById('reject-cookies').addEventListener('click', function() {
+            // Non mostrare alcun messaggio quando i cookie vengono rifiutati
+            document.getElementById('cookie-banner').style.display = 'none';
+        });
+    </script>
+</body>
+</html>

@@ -1,0 +1,145 @@
+[
+    {
+        "id": 1,
+        "utente": "test",
+        "tipo": "ticket",
+        "titolo": "Nuova risposta al tuo ticket",
+        "messaggio": "L'admin andrea ha risposto al ticket #1: Buongiorno",
+        "link": "/user#ticketSection",
+        "letta": true,
+        "data": "2026-02-27 10:40:58",
+        "data_lettura": "2026-02-27 16:22:07"
+    },
+    {
+        "id": 2,
+        "utente": "andrea",
+        "tipo": "ticket",
+        "titolo": "\ud83c\udfab Nuovo Ticket #1",
+        "messaggio": "aanastasi ha creato un nuovo ticket: Problema",
+        "link": "/admin#ticket",
+        "letta": true,
+        "data": "2026-02-28 10:10:36",
+        "data_lettura": "2026-02-28 10:16:44"
+    },
+    {
+        "id": 3,
+        "utente": "aanastasi",
+        "tipo": "ticket",
+        "titolo": "\ud83d\udcac Risposta al tuo ticket",
+        "messaggio": "L'admin andrea ha risposto al ticket #1: Problema",
+        "link": "/user#ticket",
+        "letta": true,
+        "data": "2026-02-28 10:13:17",
+        "data_lettura": "2026-02-28 12:27:29"
+    },
+    {
+        "id": 4,
+        "utente": "andrea",
+        "tipo": "chat",
+        "titolo": "\ud83d\udcac Nuovo messaggio in chat",
+        "messaggio": "aanastasi ha inviato un messaggio",
+        "link": "/admin#chat",
+        "letta": true,
+        "data": "2026-02-28 11:11:46",
+        "data_lettura": "2026-03-24 17:24:17"
+    },
+    {
+        "id": 5,
+        "utente": "test",
+        "tipo": "sistema",
+        "titolo": "\u2699\ufe0f Il tuo account \u00e8 stato aggiornato",
+        "messaggio": "Un admin ha modificato alcune impostazioni del tuo account.",
+        "link": "/user",
+        "letta": true,
+        "data": "2026-02-28 11:24:28",
+        "data_lettura": "2026-02-28 11:24:44"
+    },
+    {
+        "id": 6,
+        "utente": "test",
+        "tipo": "sistema",
+        "titolo": "\u2699\ufe0f Il tuo account \u00e8 stato aggiornato",
+        "messaggio": "Un admin ha modificato alcune impostazioni del tuo account.",
+        "link": "/user",
+        "letta": true,
+        "data": "2026-02-28 11:25:45",
+        "data_lettura": "2026-02-28 12:26:17"
+    },
+    {
+        "id": 7,
+        "utente": "test",
+        "tipo": "sistema",
+        "titolo": "\u2699\ufe0f Stato account aggiornato",
+        "messaggio": "Il tuo account \u00e8 stato sospeso. Contatta l'admin.",
+        "link": "/login",
+        "letta": true,
+        "data": "2026-02-28 11:50:42",
+        "data_lettura": "2026-02-28 12:26:15"
+    },
+    {
+        "id": 8,
+        "utente": "test",
+        "tipo": "sistema",
+        "titolo": "\u2699\ufe0f Stato account aggiornato",
+        "messaggio": "Il tuo account \u00e8 stato riattivato.",
+        "link": "/user",
+        "letta": true,
+        "data": "2026-02-28 11:51:06",
+        "data_lettura": "2026-04-07 14:34:50"
+    },
+    {
+        "id": 9,
+        "utente": "prova",
+        "tipo": "registrazione",
+        "titolo": "\u2705 Registrazione approvata",
+        "messaggio": "Il tuo account \u00e8 stato approvato! Ora puoi accedere.",
+        "link": "/login",
+        "letta": false,
+        "data": "2026-02-28 12:25:26",
+        "data_lettura": null
+    },
+    {
+        "id": 10,
+        "utente": "andrea",
+        "tipo": "segnalazione",
+        "titolo": "\ud83d\udea9 Nuova Segnalazione",
+        "messaggio": "aanastasi ha segnalato un contenuto",
+        "link": "/admin#segnalazioni",
+        "letta": true,
+        "data": "2026-03-24 17:29:34",
+        "data_lettura": "2026-04-06 14:19:43"
+    },
+    {
+        "id": 11,
+        "utente": "andrea",
+        "tipo": "ticket",
+        "titolo": "\ud83c\udfab Nuovo Ticket #1",
+        "messaggio": "test ha creato un nuovo ticket: Malfunzionamento sito",
+        "link": "/admin#ticket",
+        "letta": false,
+        "data": "2026-04-11 12:11:45",
+        "data_lettura": null
+    },
+    {
+        "id": 12,
+        "utente": "andrea",
+        "tipo": "ticket",
+        "titolo": "\ud83c\udfab Nuovo Ticket #1",
+        "messaggio": "test ha creato un nuovo ticket: problema",
+        "link": "/admin#ticket",
+        "letta": false,
+        "data": "2026-04-13 10:26:11",
+        "data_lettura": null
+    },
+    {
+        "id": 13,
+        "utente": "andrea",
+        "tipo": "ticket",
+        "titolo": "\ud83c\udfab Nuovo Ticket #1",
+        "messaggio": "test ha creato un nuovo ticket: Problema",
+        "link": "/admin#ticket",
+        "letta": false,
+        "data": "2026-04-16 15:21:13",
+        "data_lettura": null
+    }
+]

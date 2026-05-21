@@ -1,0 +1,14 @@
+[
+    {
+        "id": 1,
+        "utente": "test",
+        "oggetto": "Problema",
+        "messaggio": "Esempio problema",
+        "priorita": "media",
+        "stato": "aperto",
+        "data_apertura": "2026-04-16 15:21:13",
+        "data_chiusura": null,
+        "admin_assegnato": null,
+        "risposte": []
+    }
+]
