@@ -9,7 +9,7 @@ from sqlalchemy import or_, inspect, text
 from collections import Counter, defaultdict
 from dotenv import load_dotenv
 from werkzeug.security import generate_password_hash, check_password_hash
-import os, re, csv, io, json, secrets, random, smtplib, sys, uuid
+import os, re, csv, io, json, secrets, random, smtplib, sys, uuid, shutil, zipfile
 from datetime import datetime, timedelta
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
@@ -26,18 +26,15 @@ app.config["SESSION_COOKIE_SECURE"] = os.getenv("COOKIE_SECURE", "false").lower(
 # =====================================================
 # ============= CONFIGURAZIONE DATABASE ===============
 # =====================================================
-
 # Determina la cartella base dell'app (dove si trova app.py)
 if getattr(sys, 'frozen', False):
     BASE_DIR = os.path.dirname(sys.executable)
 else:
     BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-
 print(f"[RegistroProf] BASE_DIR: {BASE_DIR}")
 
 # Carica URL database
 database_url = os.getenv("DATABASE_URL", "").strip()
-
 # Fallback intelligente: SQLite con percorso ASSOLUTO per sviluppo locale
 if not database_url or "host" in database_url or "@localhost" in database_url:
     database_url = f"sqlite:///{os.path.join(BASE_DIR, 'registro.db')}"
@@ -67,21 +64,26 @@ UPLOAD_FOLDER = os.path.join(BASE_DIR, "uploads", "materiali")
 AVATAR_FOLDER = os.path.join(BASE_DIR, "uploads", "avatars")
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 os.makedirs(AVATAR_FOLDER, exist_ok=True)
+
 MAX_UPLOAD_BYTES = min(int(os.getenv("MAX_UPLOAD_MB", "18")) * 1024 * 1024, 52428800)
 ALLOWED_EXT_MAT = frozenset("pdf zip doc docx pptx txt jpg jpeg png gif".split())
 
 def rl_key_lim():
     uid = session.get("username")
-    return uid if uid else ("ip:"+get_remote_address())
+    return uid if uid else ("ip:" + get_remote_address())
 
-limiter = Limiter(app=app, key_func=rl_key_lim, default_limits=[], storage_uri=os.getenv("RATELIMIT_STORAGE_URI","memory://"))
+limiter = Limiter(app=app, key_func=rl_key_lim, default_limits=[], storage_uri=os.getenv("RATELIMIT_STORAGE_URI", "memory://"))
 
 def migrate_sqlite():
     uri = str(app.config["SQLALCHEMY_DATABASE_URI"] or "")
     if not uri.startswith("sqlite"): return
-    migr = {"users":[("avatar_preset","INTEGER DEFAULT 0"), ("avatar_file","VARCHAR(260)"), ("oauth_provider","VARCHAR(40)"), ("oauth_sub","VARCHAR(120)")],
-            "reviews":[("is_anonymous","BOOLEAN DEFAULT 0"), ("professor_id","INTEGER")],
-            "notices":[("expires_at","DATETIME")]}
+    migr = {
+        "users": [("avatar_preset", "INTEGER DEFAULT 0"), ("avatar_file", "VARCHAR(260)"), ("oauth_provider", "VARCHAR(40)"), ("oauth_sub", "VARCHAR(120)")],
+        "professors": [("profilo_pubblico", "BOOLEAN DEFAULT 0"), ("avatar_file", "VARCHAR(260)"), ("materie_extra", "JSON"), ("istituto", "VARCHAR(180)")],
+        "reviews": [("is_anonymous", "BOOLEAN DEFAULT 0"), ("professor_id", "INTEGER")],
+        "notices": [("expires_at", "DATETIME")],
+        "password_recovery": [("expires_at", "DATETIME"), ("attempts", "INTEGER DEFAULT 0")]
+    }
     try:
         insp = inspect(db.engine)
         for table, defs in migr.items():
@@ -109,7 +111,7 @@ def oauth_setup():
             client_id=os.getenv("GOOGLE_CLIENT_ID"),
             client_secret=os.getenv("GOOGLE_CLIENT_SECRET"),
             server_metadata_url="https://accounts.google.com/.well-known/openid-configuration",
-            client_kwargs={"scope":"openid email profile"},
+            client_kwargs={"scope": "openid email profile"},
         )
     if os.getenv("MICROSOFT_CLIENT_ID") and os.getenv("MICROSOFT_CLIENT_SECRET"):
         tid = os.getenv("MICROSOFT_TENANT_ID", "common")
@@ -118,7 +120,7 @@ def oauth_setup():
             client_id=os.getenv("MICROSOFT_CLIENT_ID"),
             client_secret=os.getenv("MICROSOFT_CLIENT_SECRET"),
             server_metadata_url=f"https://login.microsoftonline.com/{tid}/v2.0/.well-known/openid-configuration",
-            client_kwargs={"scope":"openid email profile"},
+            client_kwargs={"scope": "openid email profile"},
         )
     if os.getenv("FACEBOOK_CLIENT_ID") and os.getenv("FACEBOOK_CLIENT_SECRET"):
         fb = oauth_registry.register(
@@ -128,7 +130,7 @@ def oauth_setup():
             access_token_url="https://graph.facebook.com/oauth/access_token",
             authorize_url="https://www.facebook.com/dialog/oauth",
             api_base_url="https://graph.facebook.com/",
-            client_kwargs={"scope":"email"},
+            client_kwargs={"scope": "email"},
         )
     return ggl, ms, fb
 
@@ -139,8 +141,10 @@ def oauth_find_or_create(provider, sub, email, nome):
     email = (email or "").strip() or None
     nome = (nome or "").strip() or None
     if not provider or not sub: return None, "oauth_param"
+    
     existing = User.query.filter_by(oauth_provider=provider, oauth_sub=str(sub)).first()
     if existing: return existing, None
+    
     if email:
         ex = User.query.filter_by(email=email).first()
         if ex:
@@ -148,30 +152,34 @@ def oauth_find_or_create(provider, sub, email, nome):
                 return None, "email_conflict"
             ex.oauth_provider, ex.oauth_sub = provider, str(sub)
             if nome and not (ex.nome_cognome or "").strip(): ex.nome_cognome = nome[:150]
-            db.session.commit(); return ex, None
+            db.session.commit()
+            return ex, None
+            
     base_raw = (email.split("@")[0] if email else "") or "studente"
     base = re.sub(r"[^a-zA-Z0-9._-]", "", base_raw)[:24] or "studente"
     un, i = base, 0
     while User.query.filter_by(username=un).first():
-        i += 1; un = f"{base}{i}"
+        i += 1
+        un = f"{base}{i}"
+        
     pwd = password_hash(secrets.token_urlsafe(24))
     em_used = email
     if not em_used:
         em_used = f"{un}.{provider}@oauth.local.placeholder"
         while User.query.filter_by(email=em_used).first():
             em_used = f"{un}.{uuid.uuid4().hex[:8]}@{provider}.oauth.placeholder"
+            
     u = User(username=un, password=pwd, email=em_used, nome_cognome=(nome or un)[:150], role="user",
              stato="attivo", account_status="attivo", oauth_provider=provider, oauth_sub=str(sub))
-    db.session.add(u); db.session.commit()
+    db.session.add(u)
+    db.session.commit()
     return u, None
 
 def oauth_finalize_redirect(user_row):
-    if user_row.account_status == "sospeso":
-        return redirect(url_for("login"))
-    if user_row.account_status == "bannato":
-        return redirect(url_for("login"))
-    if getattr(user_row, "stato", "") == "in_attesa":
-        return redirect(url_for("login"))
+    if user_row.account_status == "sospeso": return redirect(url_for("login"))
+    if user_row.account_status == "bannato": return redirect(url_for("login"))
+    if getattr(user_row, "stato", "") == "in_attesa": return redirect(url_for("login"))
+    
     session["username"], session["role"] = user_row.username, user_row.role
     session["session_id"] = registra_sessione(user_row.username)
     log_audit("login_oauth", target_username=user_row.username)
@@ -181,16 +189,13 @@ def materiale_consentiti(fname):
     return "." in fname and fname.rsplit(".", 1)[-1].lower() in ALLOWED_EXT_MAT
 
 def chiav_prof(pref_id=None, nome=None, mat=None, scuola=None):
-    if pref_id:
-        return f"id:{pref_id}"
-    return "|".join([(nome or "").lower().strip(),(mat or "").lower().strip(),(scuola or "").lower().strip()])[:255]
+    if pref_id: return f"id:{pref_id}"
+    return "|".join([(nome or "").lower().strip(), (mat or "").lower().strip(), (scuola or "").lower().strip()])[:255]
 
 def find_flat_comment(comms, cid):
-    """Ricerca ricorsiva in lista commenti (vecchio formato nidificato oppure lista piatta)."""
     if cid is None: return None
     for c in comms or []:
-        if isinstance(c, dict) and int(c.get("id", -1)) == int(cid):
-            return c
+        if isinstance(c, dict) and int(c.get("id", -1)) == int(cid): return c
         sub = c.get("replies") if isinstance(c, dict) else None
         if sub:
             f = find_flat_comment(sub, cid)
@@ -201,10 +206,8 @@ def max_review_comment_id(comms):
     m = 0
     for c in comms or []:
         if not isinstance(c, dict): continue
-        try:
-            cid = int(c.get("id") or 0)
-        except (TypeError, ValueError):
-            cid = 0
+        try: cid = int(c.get("id") or 0)
+        except (TypeError, ValueError): cid = 0
         m = max(m, cid)
         m = max(m, max_review_comment_id(c.get("replies") or []))
     return m
@@ -213,12 +216,13 @@ def flatten_comments_for_notify(comms, out=None):
     out = out if out is not None else []
     for c in comms or []:
         if isinstance(c, dict):
-            out.append(c); flatten_comments_for_notify(c.get("replies") or [], out)
+            out.append(c)
+            flatten_comments_for_notify(c.get("replies") or [], out)
     return out
 
 def notify_favorites_new_review(rec_row):
     try:
-        fk = chiav_prof(None, getattr(rec_row, "nomeProfRec", None), "", getattr(rec_row, "scuola", None) or "")
+        fk = chiav_prof(None, getattr(rec_row, "nomeProfRec", None), " ", getattr(rec_row, "scuola", None) or "")
         conds = [ProfessorFavorite.chiave_prof == fk]
         if getattr(rec_row, "professor_id", None):
             conds.append(ProfessorFavorite.professor_id == rec_row.professor_id)
@@ -227,28 +231,25 @@ def notify_favorites_new_review(rec_row):
             if pf.username == rec_row.username: continue
             u = User.query.filter_by(username=pf.username).first()
             lab = getattr(rec_row, "nomeProfRec", "") or "Professore"
-            crea_notifica(pf.username, "preferiti", "Nuova recensione su un professore tra i tuoi seguiti",
-                          f"Hai ricevuto un aggiornamento relativo a: {lab}.", "/user#recensioni")
+            crea_notifica(pf.username, "preferiti", "Nuova recensione su un professore tra i tuoi seguiti", f"Hai ricevuto un aggiornamento relativo a: {lab}.", "/user#recensioni")
     except Exception as e:
         print(f"[notify_favorites_new_review] {e}")
 
 def notify_favorites_new_material(material_row):
     try:
-        fk = chiav_prof(getattr(material_row, "professor_id", None), getattr(material_row, "professore_nome", None),
-                        getattr(material_row, "materia", None), getattr(material_row, "scuola", None))
+        fk = chiav_prof(getattr(material_row, "professor_id", None), getattr(material_row, "professore_nome", None), getattr(material_row, "materia", None), getattr(material_row, "scuola", None))
         q = ProfessorFavorite.query.filter(ProfessorFavorite.chiave_prof == fk)
         for pf in q.all():
-            if pf.username == material_row.caricato_da:
-                continue
-            crea_notifica(pf.username, "preferiti", "Nuovo materiale su un professore seguito",
-                          f"Disponibile nuovo materiale: {material_row.titolo or 'Materiale didattico'}.", "/user#materiali")
+            if pf.username == material_row.caricato_da: continue
+            crea_notifica(pf.username, "preferiti", "Nuovo materiale su un professore seguito", f"Disponibile nuovo materiale: {material_row.titolo or 'Materiale didattico'}.", "/user#materiali")
     except Exception as e:
         print(f"[notify_favorites_new_material] {e}")
 
 def recensioni_mask_row(rec_row):
     out = rec_row.to_dict()
     anon = bool(getattr(rec_row, "is_anonymous", False))
-    vu = session.get("username"); ad = session.get("role") == "admin"
+    vu = session.get("username")
+    ad = session.get("role") == "admin"
     out["is_mine"] = bool(vu and vu == rec_row.username)
     if anon and not ad and vu != rec_row.username:
         out["user"], out["_anon"] = "Anonimo", True
@@ -259,7 +260,6 @@ def recensioni_mask_row(rec_row):
 # =====================================================
 # ============= MODELLI DATABASE ======================
 # =====================================================
-
 class User(db.Model):
     __tablename__ = 'users'
     id = db.Column(db.Integer, primary_key=True)
@@ -282,14 +282,14 @@ class User(db.Model):
     avatar_file = db.Column(db.String(260))
     oauth_provider = db.Column(db.String(40))
     oauth_sub = db.Column(db.String(120), index=True)
-    
+
     def to_dict(self, include_sensitive=False):
-        d = {'id':self.id,'username':self.username,'email':self.email,'nome_cognome':self.nome_cognome,
-             'scuola':self.scuola,'role':self.role,'stato':self.stato,'account_status':self.account_status,
-             'created_at':self.created_at.strftime("%Y-%m-%d %H:%M:%S") if self.created_at else None}
+        d = {'id': self.id, 'username': self.username, 'email': self.email, 'nome_cognome': self.nome_cognome,
+             'scuola': self.scuola, 'role': self.role, 'stato': self.stato, 'account_status': self.account_status,
+             'created_at': self.created_at.strftime("%Y-%m-%d %H:%M:%S") if self.created_at else None}
         if include_sensitive:
-            d.update({'telefono':self.telefono,'data_nascita':self.data_nascita,'indirizzo':self.indirizzo,
-                      'citta':self.citta,'cap':self.cap,'admin_note':self.admin_note})
+            d.update({'telefono': self.telefono, 'data_nascita': self.data_nascita, 'indirizzo': self.indirizzo,
+                      'citta': self.citta, 'cap': self.cap, 'admin_note': self.admin_note})
         d['avatar_preset'] = self.avatar_preset or 0
         d['avatar_file'] = bool(self.avatar_file)
         return d
@@ -303,10 +303,11 @@ class Vote(db.Model):
     materia = db.Column(db.String(100))
     scuola = db.Column(db.String(150))
     timestamp = db.Column(db.DateTime, default=datetime.now)
+
     def to_dict(self):
-        return {'id':self.id,'user':self.username,'voto':self.voto,'nomeProf':self.nomeProf,
-                'materia':self.materia,'scuola':self.scuola,
-                'timestamp':self.timestamp.strftime("%Y-%m-%d %H:%M:%S") if self.timestamp else None}
+        return {'id': self.id, 'user': self.username, 'voto': self.voto, 'nomeProf': self.nomeProf,
+                'materia': self.materia, 'scuola': self.scuola,
+                'timestamp': self.timestamp.strftime("%Y-%m-%d %H:%M:%S") if self.timestamp else None}
 
 class Review(db.Model):
     __tablename__ = 'reviews'
@@ -323,12 +324,13 @@ class Review(db.Model):
     timestamp = db.Column(db.DateTime, default=datetime.now)
     is_anonymous = db.Column(db.Boolean, default=False)
     professor_id = db.Column(db.Integer, index=True)
+
     def to_dict(self):
-        return {'id':self.id,'user':self.username,'nomeProfRec':self.nomeProfRec,'scuola':self.scuola,
-                'recensione':self.recensione,'likes':self.likes,'dislikes':self.dislikes,
-                'user_likes':self.user_likes,'user_dislikes':self.user_dislikes,'commenti':self.commenti,
-                'timestamp':self.timestamp.strftime("%Y-%m-%d %H:%M:%S") if self.timestamp else None,
-                'is_anonymous': bool(self.is_anonymous),'professor_id':self.professor_id}
+        return {'id': self.id, 'user': self.username, 'nomeProfRec': self.nomeProfRec, 'scuola': self.scuola,
+                'recensione': self.recensione, 'likes': self.likes, 'dislikes': self.dislikes,
+                'user_likes': self.user_likes, 'user_dislikes': self.user_dislikes, 'commenti': self.commenti,
+                'timestamp': self.timestamp.strftime("%Y-%m-%d %H:%M:%S") if self.timestamp else None,
+                'is_anonymous': bool(self.is_anonymous), 'professor_id': self.professor_id}
 
 class Professor(db.Model):
     __tablename__ = 'professors'
@@ -336,10 +338,20 @@ class Professor(db.Model):
     nome = db.Column(db.String(100), nullable=False)
     materia = db.Column(db.String(100))
     scuola = db.Column(db.String(150))
+    istituto = db.Column(db.String(180))
     descrizione = db.Column(db.Text)
+    profilo_pubblico = db.Column(db.Boolean, default=False)
+    avatar_file = db.Column(db.String(260))
+    materie_extra = db.Column(db.JSON, default=list)
     created_at = db.Column(db.DateTime, default=datetime.now)
+
     def to_dict(self):
-        return {'id':self.id,'nome':self.nome,'materia':self.materia,'scuola':self.scuola,'descrizione':self.descrizione}
+        av = (self.avatar_file or "").strip()
+        return {'id': self.id, 'nome': self.nome, 'materia': self.materia, 'scuola': self.scuola,
+                'istituto': self.istituto or self.scuola, 'descrizione': self.descrizione,
+                'profilo_pubblico': bool(self.profilo_pubblico),
+                'avatar_url': url_for("uploads_avatars_public", fname=av, _external=False) if av else None,
+                'materie': ([self.materia] if self.materia else []) + list(self.materie_extra or [])}
 
 class Subject(db.Model):
     __tablename__ = 'subjects'
@@ -347,6 +359,7 @@ class Subject(db.Model):
     nome = db.Column(db.String(120), unique=True, nullable=False, index=True)
     created_by = db.Column(db.String(80))
     created_at = db.Column(db.DateTime, default=datetime.now)
+
     def to_dict(self):
         return {"id": self.id, "nome": self.nome, "created_by": self.created_by,
                 "created_at": self.created_at.strftime("%Y-%m-%d %H:%M:%S") if self.created_at else None}
@@ -357,6 +370,7 @@ class School(db.Model):
     nome = db.Column(db.String(180), unique=True, nullable=False, index=True)
     created_by = db.Column(db.String(80))
     created_at = db.Column(db.DateTime, default=datetime.now)
+
     def to_dict(self):
         return {"id": self.id, "nome": self.nome, "created_by": self.created_by,
                 "created_at": self.created_at.strftime("%Y-%m-%d %H:%M:%S") if self.created_at else None}
@@ -376,11 +390,12 @@ class SessionLog(db.Model):
     login_time = db.Column(db.DateTime, default=datetime.now)
     last_activity = db.Column(db.DateTime, default=datetime.now)
     user_agent = db.Column(db.String(200))
+
     def to_dict(self):
-        return {'session_id':self.session_id,'username':self.username,'ip':self.ip,
-                'login_time':self.login_time.strftime("%Y-%m-%d %H:%M:%S") if self.login_time else None,
-                'last_activity':self.last_activity.strftime("%Y-%m-%d %H:%M:%S") if self.last_activity else None,
-                'user_agent':self.user_agent}
+        return {'session_id': self.session_id, 'username': self.username, 'ip': self.ip,
+                'login_time': self.login_time.strftime("%Y-%m-%d %H:%M:%S") if self.login_time else None,
+                'last_activity': self.last_activity.strftime("%Y-%m-%d %H:%M:%S") if self.last_activity else None,
+                'user_agent': self.user_agent}
 
 class RegistrationRequest(db.Model):
     __tablename__ = 'registration_requests'
@@ -394,11 +409,12 @@ class RegistrationRequest(db.Model):
     admin_note = db.Column(db.Text)
     data_registrazione = db.Column(db.DateTime, default=datetime.now)
     data_approvazione = db.Column(db.DateTime)
+
     def to_dict(self):
-        return {'id':self.id,'username':self.username,'email':self.email,'nome_cognome':self.nome_cognome,
-                'scuola':self.scuola,'stato':self.stato,'admin_note':self.admin_note,
-                'data_registrazione':self.data_registrazione.strftime("%Y-%m-%d %H:%M:%S") if self.data_registrazione else None,
-                'data_approvazione':self.data_approvazione.strftime("%Y-%m-%d %H:%M:%S") if self.data_approvazione else None}
+        return {'id': self.id, 'username': self.username, 'email': self.email, 'nome_cognome': self.nome_cognome,
+                'scuola': self.scuola, 'stato': self.stato, 'admin_note': self.admin_note,
+                'data_registrazione': self.data_registrazione.strftime("%Y-%m-%d %H:%M:%S") if self.data_registrazione else None,
+                'data_approvazione': self.data_approvazione.strftime("%Y-%m-%d %H:%M:%S") if self.data_approvazione else None}
 
 class Ticket(db.Model):
     __tablename__ = 'tickets'
@@ -412,12 +428,13 @@ class Ticket(db.Model):
     data_chiusura = db.Column(db.DateTime)
     admin_assegnato = db.Column(db.String(80))
     risposte = db.Column(db.JSON, default=list)
+
     def to_dict(self):
-        return {'id':self.id,'utente':self.utente,'oggetto':self.oggetto,'messaggio':self.messaggio,
-                'priorita':self.priorita,'stato':self.stato,
-                'data_apertura':self.data_apertura.strftime("%Y-%m-%d %H:%M:%S") if self.data_apertura else None,
-                'data_chiusura':self.data_chiusura.strftime("%Y-%m-%d %H:%M:%S") if self.data_chiusura else None,
-                'admin_assegnato':self.admin_assegnato,'risposte':self.risposte}
+        return {'id': self.id, 'utente': self.utente, 'oggetto': self.oggetto, 'messaggio': self.messaggio,
+                'priorita': self.priorita, 'stato': self.stato,
+                'data_apertura': self.data_apertura.strftime("%Y-%m-%d %H:%M:%S") if self.data_apertura else None,
+                'data_chiusura': self.data_chiusura.strftime("%Y-%m-%d %H:%M:%S") if self.data_chiusura else None,
+                'admin_assegnato': self.admin_assegnato, 'risposte': self.risposte}
 
 class Report(db.Model):
     __tablename__ = 'reports'
@@ -430,11 +447,12 @@ class Report(db.Model):
     admin_note = db.Column(db.Text)
     data = db.Column(db.DateTime, default=datetime.now)
     data_chiusura = db.Column(db.DateTime)
+
     def to_dict(self):
-        return {'id':self.id,'tipo':self.tipo,'indice':self.indice,'motivo':self.motivo,
-                'segnalatore':self.segnalatore,'stato':self.stato,'admin_note':self.admin_note,
-                'data':self.data.strftime("%Y-%m-%d %H:%M:%S") if self.data else None,
-                'data_chiusura':self.data_chiusura.strftime("%Y-%m-%d %H:%M:%S") if self.data_chiusura else None}
+        return {'id': self.id, 'tipo': self.tipo, 'indice': self.indice, 'motivo': self.motivo,
+                'segnalatore': self.segnalatore, 'stato': self.stato, 'admin_note': self.admin_note,
+                'data': self.data.strftime("%Y-%m-%d %H:%M:%S") if self.data else None,
+                'data_chiusura': self.data_chiusura.strftime("%Y-%m-%d %H:%M:%S") if self.data_chiusura else None}
 
 class Notice(db.Model):
     __tablename__ = 'notices'
@@ -445,11 +463,12 @@ class Notice(db.Model):
     priority = db.Column(db.String(20), default='normal')
     created_at = db.Column(db.DateTime, default=datetime.now)
     expires_at = db.Column(db.DateTime)
+
     def to_dict(self):
-        return {'id':self.id,'titolo':self.titolo,'contenuto':self.contenuto,'attivo':self.attivo,
-                'priority':self.priority,
-                'created_at':self.created_at.strftime("%Y-%m-%d %H:%M:%S") if self.created_at else None,
-                'expires_at':self.expires_at.strftime("%Y-%m-%d %H:%M:%S") if self.expires_at else None}
+        return {'id': self.id, 'titolo': self.titolo, 'contenuto': self.contenuto, 'attivo': self.attivo,
+                'priority': self.priority,
+                'created_at': self.created_at.strftime("%Y-%m-%d %H:%M:%S") if self.created_at else None,
+                'expires_at': self.expires_at.strftime("%Y-%m-%d %H:%M:%S") if self.expires_at else None}
 
 class Notification(db.Model):
     __tablename__ = 'notifications'
@@ -462,11 +481,12 @@ class Notification(db.Model):
     letta = db.Column(db.Boolean, default=False)
     data = db.Column(db.DateTime, default=datetime.now)
     data_lettura = db.Column(db.DateTime)
+
     def to_dict(self):
-        return {'id':self.id,'utente':self.utente,'tipo':self.tipo,'titolo':self.titolo,'messaggio':self.messaggio,
-                'link':self.link,'letta':self.letta,
-                'data':self.data.strftime("%Y-%m-%d %H:%M:%S") if self.data else None,
-                'data_lettura':self.data_lettura.strftime("%Y-%m-%d %H:%M:%S") if self.data_lettura else None}
+        return {'id': self.id, 'utente': self.utente, 'tipo': self.tipo, 'titolo': self.titolo, 'messaggio': self.messaggio,
+                'link': self.link, 'letta': self.letta,
+                'data': self.data.strftime("%Y-%m-%d %H:%M:%S") if self.data else None,
+                'data_lettura': self.data_lettura.strftime("%Y-%m-%d %H:%M:%S") if self.data_lettura else None}
 
 class PasswordRecovery(db.Model):
     __tablename__ = 'password_recovery'
@@ -474,10 +494,15 @@ class PasswordRecovery(db.Model):
     username = db.Column(db.String(80), nullable=False, index=True)
     codice = db.Column(db.String(10), nullable=False)
     data_richiesta = db.Column(db.DateTime, default=datetime.now)
+    expires_at = db.Column(db.DateTime)
+    attempts = db.Column(db.Integer, default=0)
     usato = db.Column(db.Boolean, default=False)
+
     def to_dict(self):
-        return {'id':self.id,'username':self.username,'codice':self.codice,
-                'data_richiesta':self.data_richiesta.strftime("%Y-%m-%d %H:%M:%S") if self.data_richiesta else None,'usato':self.usato}
+        return {'id': self.id, 'username': self.username, 'codice': self.codice,
+                'data_richiesta': self.data_richiesta.strftime("%Y-%m-%d %H:%M:%S") if self.data_richiesta else None,
+                'expires_at': self.expires_at.strftime("%Y-%m-%d %H:%M:%S") if self.expires_at else None,
+                'attempts': self.attempts or 0, 'usato': self.usato}
 
 class AuditLog(db.Model):
     __tablename__ = 'audit_logs'
@@ -490,10 +515,11 @@ class AuditLog(db.Model):
     user_agent = db.Column(db.String(200))
     dettagli = db.Column(db.JSON)
     timestamp = db.Column(db.DateTime, default=datetime.now)
+
     def to_dict(self):
-        return {'id':self.id,'azione':self.azione,'esito':self.esito,'attore':self.attore,'target':self.target,
-                'ip':self.ip,'user_agent':self.user_agent,'dettagli':self.dettagli,
-                'timestamp':self.timestamp.strftime("%Y-%m-%d %H:%M:%S") if self.timestamp else None}
+        return {'id': self.id, 'azione': self.azione, 'esito': self.esito, 'attore': self.attore, 'target': self.target,
+                'ip': self.ip, 'user_agent': self.user_agent, 'dettagli': self.dettagli,
+                'timestamp': self.timestamp.strftime("%Y-%m-%d %H:%M:%S") if self.timestamp else None}
 
 class PrivacyRequest(db.Model):
     __tablename__ = 'privacy_requests'
@@ -504,11 +530,12 @@ class PrivacyRequest(db.Model):
     data_richiesta = db.Column(db.DateTime, default=datetime.now)
     data_chiusura = db.Column(db.DateTime)
     admin_note = db.Column(db.Text)
+
     def to_dict(self):
-        return {'id':self.id,'username':self.username,'motivo':self.motivo,'stato':self.stato,
-                'admin_note':self.admin_note,
-                'data_richiesta':self.data_richiesta.strftime("%Y-%m-%d %H:%M:%S") if self.data_richiesta else None,
-                'data_chiusura':self.data_chiusura.strftime("%Y-%m-%d %H:%M:%S") if self.data_chiusura else None}
+        return {'id': self.id, 'username': self.username, 'motivo': self.motivo, 'stato': self.stato,
+                'admin_note': self.admin_note,
+                'data_richiesta': self.data_richiesta.strftime("%Y-%m-%d %H:%M:%S") if self.data_richiesta else None,
+                'data_chiusura': self.data_chiusura.strftime("%Y-%m-%d %H:%M:%S") if self.data_chiusura else None}
 
 class NotificationPreference(db.Model):
     __tablename__ = 'notification_preferences'
@@ -516,11 +543,12 @@ class NotificationPreference(db.Model):
     username = db.Column(db.String(80), unique=True, nullable=False, index=True)
     canale_in_app = db.Column(db.Boolean, default=True)
     canale_email = db.Column(db.Boolean, default=False)
-    tipi = db.Column(db.JSON, default=lambda: {'ticket':True,'registrazione':True,'segnalazione':True,'sistema':True,'comment_reply':True,'preferiti':True})
+    tipi = db.Column(db.JSON, default=lambda: {'ticket': True, 'registrazione': True, 'segnalazione': True, 'sistema': True, 'comment_reply': True, 'preferiti': True})
     updated_at = db.Column(db.DateTime, default=datetime.now, onupdate=datetime.now)
+
     def to_dict(self):
-        return {'username':self.username,'canale_in_app':self.canale_in_app,'canale_email':self.canale_email,
-                'tipi':self.tipi,'updated_at':self.updated_at.strftime("%Y-%m-%d %H:%M:%S") if self.updated_at else None}
+        return {'username': self.username, 'canale_in_app': self.canale_in_app, 'canale_email': self.canale_email,
+                'tipi': self.tipi, 'updated_at': self.updated_at.strftime("%Y-%m-%d %H:%M:%S") if self.updated_at else None}
 
 class LoginHistory(db.Model):
     __tablename__ = 'login_histories'
@@ -530,9 +558,10 @@ class LoginHistory(db.Model):
     user_agent = db.Column(db.String(200))
     tipo = db.Column(db.String(20), default='login')
     quando = db.Column(db.DateTime, default=datetime.now)
+
     def to_dict(self):
-        return {'id':self.id,'ip':self.ip,'user_agent':self.user_agent,'tipo':self.tipo,
-                'quando':self.quando.strftime("%Y-%m-%d %H:%M:%S") if self.quando else None}
+        return {'id': self.id, 'ip': self.ip, 'user_agent': self.user_agent, 'tipo': self.tipo,
+                'quando': self.quando.strftime("%Y-%m-%d %H:%M:%S") if self.quando else None}
 
 class BannedIP(db.Model):
     __tablename__ = 'banned_ips'
@@ -570,10 +599,11 @@ class StudyMaterial(db.Model):
     mime = db.Column(db.String(80))
     dimensione = db.Column(db.Integer, default=0)
     quando = db.Column(db.DateTime, default=datetime.now)
+
     def to_dict(self):
-        return {'id':self.id,'professor_id':self.professor_id,'professore_nome':self.professore_nome,'materia':self.materia,
-                'scuola':self.scuola,'titolo':self.titolo,'caricato_da':self.caricato_da,
-                'quando':self.quando.strftime("%Y-%m-%d %H:%M:%S") if self.quando else None}
+        return {'id': self.id, 'professor_id': self.professor_id, 'professore_nome': self.professore_nome, 'materia': self.materia,
+                'scuola': self.scuola, 'titolo': self.titolo, 'caricato_da': self.caricato_da,
+                'quando': self.quando.strftime("%Y-%m-%d %H:%M:%S") if self.quando else None}
 
 class ExamEvent(db.Model):
     __tablename__ = 'exam_events'
@@ -614,12 +644,11 @@ class ProfessorFavorite(db.Model):
     professor_id = db.Column(db.Integer, index=True)
     chiave_prof = db.Column(db.String(260), nullable=False)
     professore_etichetta = db.Column(db.String(220))
-    __table_args__ = (db.UniqueConstraint('username','chiave_prof', name='uq_user_prof_pref'),)
+    __table_args__ = (db.UniqueConstraint('username', 'chiave_prof', name='uq_user_prof_pref'),)
 
 # =====================================================
 # ============= FUNZIONI DI SUPPORTO ==================
 # =====================================================
-
 def password_hash(value):
     return generate_password_hash(value, method="pbkdf2:sha256", salt_length=16)
 
@@ -633,10 +662,11 @@ def is_password_hashed(value):
     return isinstance(value, str) and value.startswith("pbkdf2:sha256:")
 
 def log_audit(azione, esito="ok", dettagli=None, target_username=None):
-    log = AuditLog(azione=azione, esito=esito, attore=session.get("username","anonimo"),
+    log = AuditLog(azione=azione, esito=esito, attore=session.get("username", "anonimo"),
                    target=target_username, ip=request.remote_addr or "0.0.0.0",
-                   user_agent=request.headers.get("User-Agent","Unknown")[:120], dettagli=dettagli or {})
-    db.session.add(log); db.session.commit()
+                   user_agent=request.headers.get("User-Agent", "Unknown")[:120], dettagli=dettagli or {})
+    db.session.add(log)
+    db.session.commit()
 
 def notices_attivi_query():
     now = datetime.now()
@@ -659,13 +689,14 @@ def tax_upsert_school(name, actor=None):
         db.session.add(School(nome=n[:180], created_by=(actor or session.get("username") or "system")))
 
 def elimina_utente_totale(username):
-    """Elimina dati dell'account (privacy / admin)."""
     u = username.strip() if username else ""
     if not u: return
-    if is_founder_user(u):
-        return
+    if is_founder_user(u): return
+    
     Vote.query.filter_by(username=u).delete()
-    Review.query.filter_by(username=u).delete()
+    for rec in Review.query.filter_by(username=u).all():
+        rec.username = f"utente_eliminato_{rec.id}"
+        rec.is_anonymous = True
     Ticket.query.filter_by(utente=u).delete()
     Notification.query.filter_by(utente=u).delete()
     NotificationPreference.query.filter_by(username=u).delete()
@@ -696,18 +727,20 @@ SPAM_BUCKET = defaultdict(list)
 
 def spam_allow(actor, bucket, max_evt, window_sec=86400):
     actor = actor or ("ip:" + (request.remote_addr or "na"))
-    key = (str(actor), str(bucket)); now_ts = datetime.now().timestamp()
+    key = (str(actor), str(bucket))
+    now_ts = datetime.now().timestamp()
     arr = [t for t in SPAM_BUCKET.get(key, []) if now_ts - t < window_sec]
-    if len(arr) >= max_evt:
-        return False
-    arr.append(now_ts); SPAM_BUCKET[key] = arr
+    if len(arr) >= max_evt: return False
+    arr.append(now_ts)
+    SPAM_BUCKET[key] = arr
     return True
 
 def login_rate_key(username):
     return f"{request.remote_addr or '0.0.0.0'}:{username.lower().strip()}"
 
 def login_is_blocked(username):
-    key = login_rate_key(username); record = LOGIN_ATTEMPTS.get(key)
+    key = login_rate_key(username)
+    record = LOGIN_ATTEMPTS.get(key)
     if not record: return False, 0
     blocked_until = record.get("blocked_until")
     if blocked_until and datetime.now() < blocked_until:
@@ -717,7 +750,7 @@ def login_is_blocked(username):
 
 def login_register_failure(username):
     key = login_rate_key(username)
-    record = LOGIN_ATTEMPTS.get(key, {"count":0,"blocked_until":None})
+    record = LOGIN_ATTEMPTS.get(key, {"count": 0, "blocked_until": None})
     record["count"] += 1
     if record["count"] >= LOGIN_MAX_ATTEMPTS:
         record["blocked_until"] = datetime.now() + timedelta(minutes=LOGIN_BLOCK_MINUTES)
@@ -727,34 +760,36 @@ def login_clear_attempts(username):
     LOGIN_ATTEMPTS.pop(login_rate_key(username), None)
 
 def default_preferenze_notifiche(username):
-    return {"username":username,"canale_in_app":True,"canale_email":False,
-            "tipi":{"ticket":True,"registrazione":True,"segnalazione":True,"sistema":True,
-                    "comment_reply":True,"preferiti":True},
-            "updated_at":datetime.now().strftime("%Y-%m-%d %H:%M:%S")}
+    return {"username": username, "canale_in_app": True, "canale_email": False,
+            "tipi": {"ticket": True, "registrazione": True, "segnalazione": True, "sistema": True,
+                     "comment_reply": True, "preferiti": True},
+            "updated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S")}
 
 @app.before_request
 def verifica_sessione_server():
-    if request.endpoint is None:
-        return
+    if request.endpoint is None: return
     rip = (request.headers.get("X-Forwarded-For") or "").split(",")[0].strip() or (request.remote_addr or "0.0.0.0")
     try:
         if BannedIP.query.filter_by(ip=rip).first():
             abort(403)
     except Exception:
         pass
+        
     EXEMPT_SESSION = frozenset({
-        "login","logout","home","index","registrazione","recupero_password","contatti_page","privacy_informativa","static",
-        "oauth_google_start","oauth_google_callback","oauth_microsoft_start","oauth_microsoft_callback",
-        "oauth_facebook_start","oauth_facebook_callback","debug_info","debug_tickets","uploads_avatars_public"})
-    if request.endpoint in EXEMPT_SESSION:
-        return
-    if not session.get("username"):
-        return
+        "login", "logout", "home", "index", "registrazione", "recupero_password", "contatti_page", "privacy_informativa", "static",
+        "oauth_google_start", "oauth_google_callback", "oauth_microsoft_start", "oauth_microsoft_callback",
+        "oauth_facebook_start", "oauth_facebook_callback", "debug_info", "debug_tickets", "uploads_avatars_public"
+    })
+    if request.endpoint in EXEMPT_SESSION: return
+    if not session.get("username"): return
     if SessionLog.query.filter_by(username=session["username"]).first() is None:
-        session.clear(); return redirect(url_for("login"))
-    sid = session.get("session_id"); row = SessionLog.query.filter_by(username=session["username"]).first()
+        session.clear()
+        return redirect(url_for("login"))
+    sid = session.get("session_id")
+    row = SessionLog.query.filter_by(username=session["username"]).first()
     if not row or not sid or row.session_id != sid:
-        session.clear(); return redirect(url_for("login"))
+        session.clear()
+        return redirect(url_for("login"))
 
 @app.after_request
 def security_headers(response):
@@ -772,8 +807,8 @@ def security_headers(response):
     return response
 
 def genera_captcha():
-    a, b = random.randint(1,10), random.randint(1,10)
-    return {"domanda": f"{a} + {b} = ?", "risposta": a+b}
+    a, b = random.randint(1, 10), random.randint(1, 10)
+    return {"domanda": f"{a} + {b} = ?", "risposta": a + b}
 
 def genera_codice_recupero():
     return str(random.randint(100000, 999999))
@@ -784,31 +819,36 @@ def genera_session_id():
 def registra_sessione(username):
     session_id = genera_session_id()
     rip = (request.headers.get("X-Forwarded-For") or "").split(",")[0].strip() or (request.remote_addr or "0.0.0.0")
-    ua = request.headers.get("User-Agent","Unknown")[:200]
+    ua = request.headers.get("User-Agent", "Unknown")[:200]
     db.session.add(LoginHistory(username=username, ip=rip, user_agent=ua[:200], tipo="login"))
     SessionLog.query.filter_by(username=username).delete()
     nuova = SessionLog(session_id=session_id, username=username, ip=rip,
                        login_time=datetime.now(), last_activity=datetime.now(),
                        user_agent=ua[:100])
-    db.session.add(nuova); db.session.commit()
+    db.session.add(nuova)
+    db.session.commit()
     return session_id
 
 def aggiorna_attivita_sessione():
     if "username" not in session: return
     s = SessionLog.query.filter_by(username=session["username"]).order_by(SessionLog.login_time.desc()).first()
-    if s: s.last_activity = datetime.now(); db.session.commit()
+    if s:
+        s.last_activity = datetime.now()
+        db.session.commit()
 
 def pulisci_sessioni_scadute():
     cutoff = datetime.now() - timedelta(days=1)
-    SessionLog.query.filter(SessionLog.last_activity < cutoff).delete(); db.session.commit()
+    SessionLog.query.filter(SessionLog.last_activity < cutoff).delete()
+    db.session.commit()
 
 def crea_notifica(username, tipo, titolo, messaggio, link=None):
     pref = NotificationPreference.query.filter_by(username=username).first()
     if pref and not pref.canale_in_app: return None
     if pref and not pref.tipi.get(tipo, True): return None
     notif = Notification(utente=username, tipo=tipo, titolo=titolo, messaggio=messaggio, link=link)
-    db.session.add(notif); db.session.commit()
-    return {"id":notif.id,"tipo":tipo,"titolo":titolo,"messaggio":messaggio}
+    db.session.add(notif)
+    db.session.commit()
+    return {"id": notif.id, "tipo": tipo, "titolo": titolo, "messaggio": messaggio}
 
 # Email config
 SMTP_SERVER = "smtp-mail.outlook.com"
@@ -823,22 +863,26 @@ def invia_email_ticket(ticket):
     try:
         msg = MIMEMultipart("alternative")
         msg["Subject"] = f"🎫 Nuovo Ticket #{ticket['id']}: {ticket['oggetto']}"
-        msg["From"] = EMAIL_SENDER; msg["To"] = EMAIL_RECEIVER
+        msg["From"] = EMAIL_SENDER
+        msg["To"] = EMAIL_RECEIVER
         ticket_link = f"{SITE_URL}/admin#ticket-{ticket['id']}"
         html = f"""<html><body style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;padding:20px;">
-            <div style="background:linear-gradient(135deg,#667eea,#764ba2);padding:20px;border-radius:10px 10px 0 0;color:white;">
-                <h2 style="margin:0;">🎫 Nuovo Ticket di Supporto</h2><p style="margin:5px 0 0 0;opacity:0.9;">Ticket #{ticket['id']}</p></div>
-            <div style="background:#f8f9fa;padding:25px;border:1px solid #e0e0e0;border-top:none;">
-                <p><strong>Utente:</strong> {ticket['utente']}</p><p><strong>Oggetto:</strong> {ticket['oggetto']}</p>
-                <p><strong>Messaggio:</strong> {ticket['messaggio']}</p>
-                <div style="text-align:center;margin:30px 0;">
-                    <a href="{ticket_link}" style="background:linear-gradient(135deg,#667eea,#764ba2);color:white;padding:14px 35px;text-decoration:none;border-radius:25px;font-weight:bold;display:inline-block;">👁️ Visualizza Ticket</a></div></div></body></html>"""
+        <div style="background:linear-gradient(135deg,#667eea,#764ba2);padding:20px;border-radius:10px 10px 0 0;color:white;">
+        <h2 style="margin:0;">🎫 Nuovo Ticket di Supporto</h2><p style="margin:5px 0 0 0;opacity:0.9;">Ticket #{ticket['id']}</p></div>
+        <div style="background:#f8f9fa;padding:25px;border:1px solid #e0e0e0;border-top:none;">
+        <p><strong>Utente:</strong> {ticket['utente']}</p><p><strong>Oggetto:</strong> {ticket['oggetto']}</p>
+        <p><strong>Messaggio:</strong> {ticket['messaggio']}</p>
+        <div style="text-align:center;margin:30px 0;">
+        <a href="{ticket_link}" style="background:linear-gradient(135deg,#667eea,#764ba2);color:white;padding:14px 35px;text-decoration:none;border-radius:25px;font-weight:bold;display:inline-block;">👁️ Visualizza Ticket</a></div></div></body></html>"""
         msg.attach(MIMEText(html, "html"))
         with smtplib.SMTP(SMTP_SERVER, SMTP_PORT) as server:
-            server.starttls(); server.login(EMAIL_SENDER, EMAIL_PASSWORD); server.send_message(msg)
+            server.starttls()
+            server.login(EMAIL_SENDER, EMAIL_PASSWORD)
+            server.send_message(msg)
         return True
     except Exception as e:
-        print(f"[email] Errore: {e}"); return False
+        print(f"[email] Errore: {e}")
+        return False
 
 def invia_email_newsletter(destinatario, subject, html_body):
     if not EMAIL_PASSWORD: return False
@@ -848,10 +892,13 @@ def invia_email_newsletter(destinatario, subject, html_body):
         msg["Subject"], msg["From"], msg["To"] = subject[:200], EMAIL_SENDER, destinatario.strip()
         msg.attach(MIMEText(html_body, "html"))
         with smtplib.SMTP(SMTP_SERVER, SMTP_PORT) as server:
-            server.starttls(); server.login(EMAIL_SENDER, EMAIL_PASSWORD); server.send_message(msg)
+            server.starttls()
+            server.login(EMAIL_SENDER, EMAIL_PASSWORD)
+            server.send_message(msg)
         return True
     except Exception as e:
-        print(f"[email_newsletter] {e}"); return False
+        print(f"[email_newsletter] {e}")
+        return False
 
 def ensure_banner_singleton():
     if SiteBanner.query.get(1) is None:
@@ -861,7 +908,6 @@ def ensure_banner_singleton():
 # =====================================================
 # ============= ROUTES PRINCIPALI =====================
 # =====================================================
-
 @app.route("/")
 def index():
     return redirect(url_for("home"))
@@ -887,68 +933,76 @@ def privacy_informativa():
 
 @app.route("/oauth/google/start")
 def oauth_google_start():
-    if oauth_google is None:
-        return redirect(url_for("login"))
+    if oauth_google is None: return redirect(url_for("login"))
     return oauth_google.authorize_redirect(url_for("oauth_google_callback", _external=True))
 
 @app.route("/oauth/google/callback")
 def oauth_google_callback():
-    if oauth_google is None:
-        return redirect(url_for("login"))
+    if oauth_google is None: return redirect(url_for("login"))
     try:
         token = oauth_google.authorize_access_token()
         ui = token.get("userinfo")
         if not ui:
-            resp = oauth_google.get("userinfo"); ui = resp.json()
-        email = ui.get("email"); sub = ui.get("sub"); nome = ui.get("name")
+            resp = oauth_google.get("userinfo")
+            ui = resp.json()
+        email = ui.get("email")
+        sub = ui.get("sub")
+        nome = ui.get("name")
         user, err = oauth_find_or_create("google", sub, email, nome)
         if err or not user: return redirect(url_for("login"))
         return oauth_finalize_redirect(user)
     except Exception as e:
-        print(f"[oauth google] {e}"); log_audit("oauth_google_fail", esito="ko"); return redirect(url_for("login"))
+        print(f"[oauth google] {e}")
+        log_audit("oauth_google_fail", esito="ko")
+        return redirect(url_for("login"))
 
 @app.route("/oauth/microsoft/start")
 def oauth_microsoft_start():
-    if oauth_ms is None:
-        return redirect(url_for("login"))
+    if oauth_ms is None: return redirect(url_for("login"))
     return oauth_ms.authorize_redirect(url_for("oauth_microsoft_callback", _external=True))
 
 @app.route("/oauth/microsoft/callback")
 def oauth_microsoft_callback():
-    if oauth_ms is None:
-        return redirect(url_for("login"))
+    if oauth_ms is None: return redirect(url_for("login"))
     try:
         token = oauth_ms.authorize_access_token()
         ui = token.get("userinfo")
         if not ui:
-            resp = oauth_ms.get("https://graph.microsoft.com/oidc/userinfo"); ui = resp.json()
-        email = ui.get("email"); sub = ui.get("sub"); nome = ui.get("name")
+            resp = oauth_ms.get("https://graph.microsoft.com/oidc/userinfo")
+            ui = resp.json()
+        email = ui.get("email")
+        sub = ui.get("sub")
+        nome = ui.get("name")
         user, err = oauth_find_or_create("microsoft", sub, email, nome)
         if err or not user: return redirect(url_for("login"))
         return oauth_finalize_redirect(user)
     except Exception as e:
-        print(f"[oauth ms] {e}"); log_audit("oauth_microsoft_fail", esito="ko"); return redirect(url_for("login"))
+        print(f"[oauth ms] {e}")
+        log_audit("oauth_microsoft_fail", esito="ko")
+        return redirect(url_for("login"))
 
 @app.route("/oauth/facebook/start")
 def oauth_facebook_start():
-    if oauth_fb is None:
-        return redirect(url_for("login"))
+    if oauth_fb is None: return redirect(url_for("login"))
     return oauth_fb.authorize_redirect(url_for("oauth_facebook_callback", _external=True))
 
 @app.route("/oauth/facebook/callback")
 def oauth_facebook_callback():
-    if oauth_fb is None:
-        return redirect(url_for("login"))
+    if oauth_fb is None: return redirect(url_for("login"))
     try:
         token = oauth_fb.authorize_access_token()
         resp = oauth_fb.get("me", params={"fields": "id,name,email"})
         ui = resp.json()
-        email = ui.get("email"); sub = ui.get("id"); nome = ui.get("name")
+        email = ui.get("email")
+        sub = ui.get("id")
+        nome = ui.get("name")
         user, err = oauth_find_or_create("facebook", str(sub), email, nome)
         if err or not user: return redirect(url_for("login"))
         return oauth_finalize_redirect(user)
     except Exception as e:
-        print(f"[oauth fb] {e}"); log_audit("oauth_facebook_fail", esito="ko"); return redirect(url_for("login"))
+        print(f"[oauth fb] {e}")
+        log_audit("oauth_facebook_fail", esito="ko")
+        return redirect(url_for("login"))
 
 @app.route("/home")
 def home():
@@ -958,7 +1012,6 @@ def home():
 @app.route("/login", methods=["GET", "POST"])
 def login():
     if request.method == "POST":
-        # Step 2FA per admin (opzionale via env ENABLE_ADMIN_2FA=true)
         otp_mode = (request.form.get("otp_mode") or "").strip() == "1"
         if otp_mode:
             otp_user = (session.get("pending_2fa_user") or "").strip()
@@ -967,18 +1020,25 @@ def login():
             if not otp_user or not otp_code:
                 return render_template("login.html", error="Codice OTP mancante", need_otp=True, otp_username=otp_user)
             if int(datetime.now().timestamp()) > exp:
-                session.pop("pending_2fa_user", None); session.pop("pending_2fa_code", None); session.pop("pending_2fa_exp", None)
+                session.pop("pending_2fa_user", None)
+                session.pop("pending_2fa_code", None)
+                session.pop("pending_2fa_exp", None)
                 return render_template("login.html", error="Codice OTP scaduto. Effettua di nuovo il login.")
             if otp_code != (session.get("pending_2fa_code") or ""):
                 log_audit("login_2fa_failed", esito="ko", target_username=otp_user)
                 return render_template("login.html", error="Codice OTP non valido", need_otp=True, otp_username=otp_user)
+            
             user = User.query.filter_by(username=otp_user).first()
-            if not user:
-                return render_template("login.html", error="Utente non trovato")
-            session.pop("pending_2fa_user", None); session.pop("pending_2fa_code", None); session.pop("pending_2fa_exp", None)
-            session["username"] = user.username; session["role"] = user.role
+            if not user: return render_template("login.html", error="Utente non trovato")
+            
+            session.pop("pending_2fa_user", None)
+            session.pop("pending_2fa_code", None)
+            session.pop("pending_2fa_exp", None)
+            session["username"] = user.username
+            session["role"] = user.role
             session["session_id"] = registra_sessione(user.username)
-            login_clear_attempts(user.username); log_audit("login_2fa_success", target_username=user.username)
+            login_clear_attempts(user.username)
+            log_audit("login_2fa_success", target_username=user.username)
             return redirect(url_for("admin_dashboard" if user.role == "admin" else "user_dashboard"))
 
         username = (request.form.get("username") or "").strip()
@@ -986,6 +1046,7 @@ def login():
         bloccato, minuti = login_is_blocked(username)
         if bloccato:
             return render_template("login.html", error=f"Troppi tentativi. Riprova tra circa {minuti} minuti.")
+            
         user = User.query.filter_by(username=username).first()
         if user and password_verifica(password, user.password):
             if user.stato == "in_attesa":
@@ -997,8 +1058,11 @@ def login():
             if user.account_status == "bannato":
                 log_audit("login_bloccato_bannato", esito="ko", target_username=username)
                 return render_template("login.html", error="❌ Il tuo account è BANNATO.")
+                
             if not is_password_hashed(user.password):
-                user.password = password_hash(password); db.session.commit()
+                user.password = password_hash(password)
+                db.session.commit()
+                
             if user.role == "admin" and os.getenv("ENABLE_ADMIN_2FA", "").lower() in ("1", "true", "yes"):
                 otp = f"{random.randint(0, 999999):06d}"
                 session["pending_2fa_user"] = username
@@ -1008,11 +1072,16 @@ def login():
                 html = f"<p>Codice OTP RegistroProf: <strong>{otp}</strong></p><p>Scade tra 7 minuti.</p>"
                 invia_email_newsletter(destinatario, "Codice OTP amministratore - RegistroProf", html)
                 return render_template("login.html", need_otp=True, otp_username=username, info="Codice OTP inviato via email.")
-            session["username"] = username; session["role"] = user.role
+                
+            session["username"] = username
+            session["role"] = user.role
             session["session_id"] = registra_sessione(username)
-            login_clear_attempts(username); log_audit("login_success", target_username=username)
+            login_clear_attempts(username)
+            log_audit("login_success", target_username=username)
             return redirect(url_for("admin_dashboard" if user.role == "admin" else "user_dashboard"))
-        login_register_failure(username); log_audit("login_failed", esito="ko", target_username=username)
+            
+        login_register_failure(username)
+        log_audit("login_failed", esito="ko", target_username=username)
         return render_template("login.html", error="Credenziali errate")
     return render_template("login.html", need_otp=False)
 
@@ -1027,7 +1096,9 @@ def recupero_password():
             if not utente:
                 return render_template("recupero_password.html", errore="Username o email non trovati", step=1)
             codice = genera_codice_recupero()
-            db.session.add(PasswordRecovery(username=username, codice=codice)); db.session.commit()
+            PasswordRecovery.query.filter_by(username=username, usato=False).update({"usato": True})
+            db.session.add(PasswordRecovery(username=username, codice=codice, expires_at=datetime.now() + timedelta(minutes=15)))
+            db.session.commit()
             return render_template("recupero_password.html", step=2, username=username, codice_mostrato=codice)
         elif step == "2":
             username = request.form.get("username", "").strip()
@@ -1035,18 +1106,35 @@ def recupero_password():
             recupero = PasswordRecovery.query.filter_by(username=username, codice=codice_inserito, usato=False).first()
             if not recupero:
                 return render_template("recupero_password.html", errore="Codice non valido", step=2, username=username)
+            recupero.attempts = (recupero.attempts or 0) + 1
+            if recupero.expires_at and recupero.expires_at < datetime.now():
+                recupero.usato = True
+                db.session.commit()
+                return render_template("recupero_password.html", errore="Codice scaduto. Richiedine uno nuovo.", step=1)
+            if (recupero.attempts or 0) > 5:
+                recupero.usato = True
+                db.session.commit()
+                return render_template("recupero_password.html", errore="Troppi tentativi. Richiedi un nuovo codice.", step=1)
+            db.session.commit()
             return render_template("recupero_password.html", step=3, username=username, codice=codice_inserito)
         elif step == "3":
             username = request.form.get("username", "").strip()
+            codice_inserito = request.form.get("codice", "").strip()
             nuova_password = request.form.get("nuova_password", "").strip()
             conferma_password = request.form.get("conferma_password", "").strip()
+            recupero = PasswordRecovery.query.filter_by(username=username, codice=codice_inserito, usato=False).first()
+            if not recupero or (recupero.expires_at and recupero.expires_at < datetime.now()):
+                return render_template("recupero_password.html", errore="Codice non valido o scaduto", step=1)
             if not nuova_password or len(nuova_password) < 4:
-                return render_template("recupero_password.html", errore="Password minima 4 caratteri", step=3, username=username)
+                return render_template("recupero_password.html", errore="Password minima 4 caratteri", step=3, username=username, codice=codice_inserito)
             if nuova_password != conferma_password:
-                return render_template("recupero_password.html", errore="Le password non coincidono", step=3, username=username)
+                return render_template("recupero_password.html", errore="Le password non coincidono", step=3, username=username, codice=codice_inserito)
             utente = User.query.filter_by(username=username).first()
-            if utente: utente.password = password_hash(nuova_password); db.session.commit()
-            PasswordRecovery.query.filter_by(username=username, usato=False).update({"usato": True}); db.session.commit()
+            if utente:
+                utente.password = password_hash(nuova_password)
+                db.session.commit()
+            PasswordRecovery.query.filter_by(username=username, usato=False).update({"usato": True})
+            db.session.commit()
             return render_template("recupero_password.html", successo="✅ Password aggiornata!")
     return render_template("recupero_password.html", step=1)
 
@@ -1060,7 +1148,9 @@ def registrazione():
         nome_cognome = request.form.get("nome_cognome", "").strip()
         scuola = request.form.get("scuola", "").strip()
         captcha_risposta = request.form.get("captcha_risposta", "").strip()
-        captcha_sessione = session.get("captcha", {}); errori = []
+        captcha_sessione = session.get("captcha", {})
+        errori = []
+        
         if not username or len(username) < 3: errori.append("Username minimo 3 caratteri")
         if not password or len(password) < 4: errori.append("Password minima 4 caratteri")
         if password != conferma_password: errori.append("Le password non coincidono")
@@ -1069,24 +1159,34 @@ def registrazione():
         if not scuola: errori.append("Scuola obbligatoria")
         try:
             if int(captcha_risposta) != captcha_sessione.get("risposta"): errori.append("CAPTCHA errato")
-        except: errori.append("CAPTCHA errato")
+        except:
+            errori.append("CAPTCHA errato")
+            
         if User.query.filter_by(username=username).first() or RegistrationRequest.query.filter_by(username=username, stato="in_attesa").first():
             errori.append("Username già esistente o in attesa")
-        if User.query.filter_by(email=email).first(): errori.append("Email già registrata")
+        if User.query.filter_by(email=email).first():
+            errori.append("Email già registrata")
+            
         if errori:
             session["captcha"] = genera_captcha()
             return render_template("registrazione.html", errori=errori, dati_inviati=request.form, captcha_domanda=session["captcha"]["domanda"])
+            
         db.session.add(RegistrationRequest(username=username, password=password_hash(password), email=email,
                                            nome_cognome=nome_cognome, scuola=scuola, stato="in_attesa"))
-        db.session.commit(); session["captcha"] = genera_captcha()
+        db.session.commit()
+        session["captcha"] = genera_captcha()
         return render_template("registrazione.html", successo="✅ Registrazione inviata! Attendi approvazione.", captcha_domanda=session["captcha"]["domanda"])
+        
     session["captcha"] = genera_captcha()
     return render_template("registrazione.html", captcha_domanda=session["captcha"]["domanda"])
 
 @app.route("/logout")
 def logout():
-    if "username" in session: SessionLog.query.filter_by(username=session["username"]).delete(); db.session.commit()
-    session.clear(); return redirect(url_for("home"))
+    if "username" in session:
+        SessionLog.query.filter_by(username=session["username"]).delete()
+        db.session.commit()
+    session.clear()
+    return redirect(url_for("home"))
 
 @app.route("/user")
 def user_dashboard():
@@ -1098,13 +1198,13 @@ def user_dashboard():
 @app.route("/admin")
 def admin_dashboard():
     if "username" not in session or session.get("role") != "admin": return redirect(url_for("login"))
-    aggiorna_attivita_sessione(); pulisci_sessioni_scadute()
+    aggiorna_attivita_sessione()
+    pulisci_sessioni_scadute()
     return render_template("admin.html", username=session["username"])
 
 # =====================================================
 # ============= API - FUNZIONI DI CONTROLLO ===========
 # =====================================================
-
 def login_required(): return "username" in session
 def admin_required(): return login_required() and session.get("role") == "admin"
 
@@ -1114,72 +1214,75 @@ def ctx_site_banner():
         banner = SiteBanner.query.get(1)
     except Exception:
         banner = None
-    return {"site_banner": banner, "oauth_google_ok": oauth_google is not None, "oauth_ms_ok": oauth_ms is not None,
-            "oauth_fb_ok": oauth_fb is not None}
+    return {"site_banner": banner, "oauth_google_ok": oauth_google is not None, "oauth_ms_ok": oauth_ms is not None, "oauth_fb_ok": oauth_fb is not None}
 
-# --- Debug (solo con ENABLE_DEBUG_ROUTES=true nell'ambiente) ---
 @app.route("/debug/info")
 def debug_info():
     if os.getenv("ENABLE_DEBUG_ROUTES", "").lower() not in ("1", "true", "yes"):
         return redirect(url_for("home"))
-    return jsonify({"BASE_DIR":BASE_DIR,"DATABASE_URL":app.config["SQLALCHEMY_DATABASE_URI"],
-                    "DB_FILE_EXISTS":os.path.exists(os.path.join(BASE_DIR,"registro.db")) if "sqlite" in app.config["SQLALCHEMY_DATABASE_URI"] else None,
-                    "SESSION":{"username":session.get("username"),"role":session.get("role")},
-                    "TIMESTAMP":datetime.now().strftime("%Y-%m-%d %H:%M:%S")})
+    return jsonify({"BASE_DIR": BASE_DIR, "DATABASE_URL": app.config["SQLALCHEMY_DATABASE_URI"],
+                    "DB_FILE_EXISTS": os.path.exists(os.path.join(BASE_DIR, "registro.db")) if "sqlite" in app.config["SQLALCHEMY_DATABASE_URI"] else None,
+                    "SESSION": {"username": session.get("username"), "role": session.get("role")},
+                    "TIMESTAMP": datetime.now().strftime("%Y-%m-%d %H:%M:%S")})
 
 @app.route("/debug/tickets")
 def debug_tickets():
     if os.getenv("ENABLE_DEBUG_ROUTES", "").lower() not in ("1", "true", "yes"):
         return redirect(url_for("home"))
-    if not login_required(): return jsonify({"error":"Login richiesto"}), 403
-    all_t = Ticket.query.all(); user_t = Ticket.query.filter_by(utente=session["username"]).all()
-    return jsonify({"total":len(all_t),"user_visible":len(user_t),"all":[t.to_dict() for t in all_t],
-                    "current_user":session["username"],"role":session.get("role")})
+    if not login_required(): return jsonify({"error": "Login richiesto"}), 403
+    all_t = Ticket.query.all()
+    user_t = Ticket.query.filter_by(utente=session["username"]).all()
+    return jsonify({"total": len(all_t), "user_visible": len(user_t), "all": [t.to_dict() for t in all_t],
+                    "current_user": session["username"], "role": session.get("role")})
 
 # =====================================================
 # ============= API - NOTIFICHE =======================
 # =====================================================
-
 @app.route("/api/notifiche", methods=["GET"])
 def api_notifiche():
-    if not login_required(): return jsonify({"error":"Non autorizzato"}), 403
+    if not login_required(): return jsonify({"error": "Non autorizzato"}), 403
     notifiche = Notification.query.filter_by(utente=session["username"]).order_by(Notification.data.desc()).all()
     return jsonify([n.to_dict() for n in notifiche])
 
 @app.route("/api/notifiche/<int:id>", methods=["PUT"])
 def api_notifica_letta(id):
-    if not login_required(): return jsonify({"error":"Non autorizzato"}), 403
+    if not login_required(): return jsonify({"error": "Non autorizzato"}), 403
     n = Notification.query.get(id)
-    if not n or n.utente != session["username"]: return jsonify({"error":"Non trovata"}), 404
-    n.letta, n.data_lettura = True, datetime.now(); db.session.commit()
-    return jsonify({"success":True})
+    if not n or n.utente != session["username"]: return jsonify({"error": "Non trovata"}), 404
+    n.letta, n.data_lettura = True, datetime.now()
+    db.session.commit()
+    return jsonify({"success": True})
 
 @app.route("/api/notifiche/segna-tutte-lette", methods=["POST"])
 def api_notifiche_tutte_lette():
-    if not login_required(): return jsonify({"error":"Non autorizzato"}), 403
-    Notification.query.filter_by(utente=session["username"], letta=False).update({"letta":True,"data_lettura":datetime.now()})
-    db.session.commit(); return jsonify({"success":True})
+    if not login_required(): return jsonify({"error": "Non autorizzato"}), 403
+    Notification.query.filter_by(utente=session["username"], letta=False).update({"letta": True, "data_lettura": datetime.now()})
+    db.session.commit()
+    return jsonify({"success": True})
 
 @app.route("/api/notifiche/preferenze", methods=["GET", "PUT"])
 def api_notifiche_preferenze():
-    if not login_required(): return jsonify({"error":"Non autorizzato"}), 403
+    if not login_required(): return jsonify({"error": "Non autorizzato"}), 403
     pref = NotificationPreference.query.filter_by(username=session["username"]).first()
-    if not pref: pref = NotificationPreference(username=session["username"]); db.session.add(pref); db.session.commit()
+    if not pref:
+        pref = NotificationPreference(username=session["username"])
+        db.session.add(pref)
+        db.session.commit()
     if request.method == "GET": return jsonify(pref.to_dict())
     data = request.get_json() or {}
     if "canale_in_app" in data: pref.canale_in_app = bool(data["canale_in_app"])
     if "canale_email" in data: pref.canale_email = bool(data["canale_email"])
     if "tipi" in data and isinstance(data["tipi"], dict):
-        for k,v in data["tipi"].items(): pref.tipi[k] = bool(v)
-    db.session.commit(); return jsonify({"success":True,"preferenze":pref.to_dict()})
+        for k, v in data["tipi"].items(): pref.tipi[k] = bool(v)
+    db.session.commit()
+    return jsonify({"success": True, "preferenze": pref.to_dict()})
 
 # =====================================================
 # ============= API - TICKET ==========================
 # =====================================================
-
 @app.route("/api/ticket", methods=["GET", "POST"])
 def api_ticket():
-    if not login_required(): return jsonify({"error":"Non autorizzato"}), 403
+    if not login_required(): return jsonify({"error": "Non autorizzato"}), 403
     if request.method == "GET":
         stato = request.args.get("stato", "").strip()
         query = Ticket.query if session["role"] == "admin" else Ticket.query.filter_by(utente=session["username"])
@@ -1188,77 +1291,86 @@ def api_ticket():
     elif request.method == "POST":
         data = request.get_json(force=True, silent=True) or {}
         target_u = session["username"]
-        if admin_required():
-            target_u = (data.get("utente") or "").strip()
-            if not target_u or not User.query.filter_by(username=target_u).first():
-                return jsonify({"error":"Specifica un utente esistente (campo utente)"}), 400
-        nuovo = Ticket(utente=target_u, oggetto=data.get("oggetto",""), messaggio=data.get("messaggio",""),
-                       priorita=data.get("priorita","media"), stato="aperto")
-        db.session.add(nuovo); db.session.commit()
+        if admin_required() and (data.get("utente") or "").strip():
+            target_u = data["utente"].strip()
+            if not User.query.filter_by(username=target_u).first():
+                return jsonify({"error": "Specifica un utente esistente (campo utente)"}), 400
+        nuovo = Ticket(utente=target_u, oggetto=data.get("oggetto", ""), messaggio=data.get("messaggio", ""),
+                       priorita=data.get("priorita", "media"), stato="aperto")
+        db.session.add(nuovo)
+        db.session.commit()
         for admin in User.query.filter_by(role="admin").all():
             crea_notifica(admin.username, "ticket", f"🎫 Nuovo Ticket #{nuovo.id}", f"{session['username']} per {target_u}: {nuovo.oggetto}", "/admin#ticket")
         if admin_required() and target_u != session["username"]:
             crea_notifica(target_u, "ticket", "📩 Ticket aperto dal supporto", f"È stato registrato un ticket (#{nuovo.id}) a tuo nome.", "/user#ticket")
         invia_email_ticket(nuovo.to_dict())
-        return jsonify({"success":True,"ticket_id":nuovo.id})
+        return jsonify({"success": True, "ticket_id": nuovo.id})
 
 @app.route("/api/ticket/<int:id>", methods=["GET", "PUT", "DELETE"])
 def api_ticket_dettaglio(id):
-    if not login_required(): return jsonify({"error":"Non autorizzato"}), 403
+    if not login_required(): return jsonify({"error": "Non autorizzato"}), 403
     ticket = Ticket.query.get(id)
-    if not ticket: return jsonify({"error":"Non trovato"}), 404
-    is_admin, is_creatore = session["role"]=="admin", ticket.utente==session["username"]
-    if not is_admin and not is_creatore: return jsonify({"error":"Non autorizzato"}), 403
+    if not ticket: return jsonify({"error": "Non trovato"}), 404
+    is_admin, is_creatore = session["role"] == "admin", ticket.utente == session["username"]
+    if not is_admin and not is_creatore: return jsonify({"error": "Non autorizzato"}), 403
+    
     if request.method == "GET": return jsonify(ticket.to_dict())
     elif request.method == "PUT":
         data = request.get_json()
         if is_admin:
-            if "stato" in data and data["stato"] in ["aperto","in_lavorazione","risolto","chiuso"]:
+            if "stato" in data and data["stato"] in ["aperto", "in_lavorazione", "risolto", "chiuso"]:
                 ticket.stato = data["stato"]
-                if data["stato"] in ["risolto","chiuso"]: ticket.data_chiusura = datetime.now()
+                if data["stato"] in ["risolto", "chiuso"]: ticket.data_chiusura = datetime.now()
             if "risposta" in data and data["risposta"]:
                 risposte = list(ticket.risposte or [])
-                risposte.append({"da":"admin","admin":session["username"],"messaggio":data["risposta"],"data":datetime.now().strftime("%Y-%m-%d %H:%M:%S")})
+                risposte.append({"da": "admin", "admin": session["username"], "messaggio": data["risposta"], "data": datetime.now().strftime("%Y-%m-%d %H:%M:%S")})
                 ticket.risposte = risposte
                 crea_notifica(ticket.utente, "ticket", "💬 Risposta al tuo ticket", f"Admin {session['username']} ha risposto al ticket #{id}", "/user#ticket")
         elif is_creatore and ticket.stato == "aperto" and "messaggio" in data and data["messaggio"]:
             risposte = list(ticket.risposte or [])
-            risposte.append({"da":"utente","utente":session["username"],"messaggio":data["messaggio"],"data":datetime.now().strftime("%Y-%m-%d %H:%M:%S")})
+            risposte.append({"da": "utente", "utente": session["username"], "messaggio": data["messaggio"], "data": datetime.now().strftime("%Y-%m-%d %H:%M:%S")})
             ticket.risposte = risposte
-        db.session.commit(); return jsonify({"success":True})
+        db.session.commit()
+        return jsonify({"success": True})
     elif request.method == "DELETE":
-        if is_admin or (is_creatore and len(ticket.risposte)==0):
-            db.session.delete(ticket); db.session.commit(); return jsonify({"success":True})
-        return jsonify({"error":"Non puoi eliminare ticket con risposte"}), 403
+        if is_admin or (is_creatore and len(ticket.risposte) == 0):
+            db.session.delete(ticket)
+            db.session.commit()
+            return jsonify({"success": True})
+        return jsonify({"error": "Non puoi eliminare ticket con risposte"}), 403
 
 # =====================================================
 # ============= API - REGISTRAZIONI ===================
 # =====================================================
-
 @app.route("/api/registrazioni", methods=["GET", "POST"])
 def api_registrazioni_lista():
-    if not admin_required(): return jsonify({"error":"Solo admin"}), 403
+    if not admin_required(): return jsonify({"error": "Solo admin"}), 403
     if request.method == "GET":
         return jsonify([r.to_dict() for r in RegistrationRequest.query.order_by(RegistrationRequest.data_registrazione.desc()).all()])
     data = request.get_json(force=True, silent=True) or {}
     nu = RegistrationRequest(username=(data.get("username") or "").strip(),
                              password=password_hash(str(data.get("password") or "changeme")), email=data.get("email"),
                              nome_cognome=data.get("nome_cognome"), scuola=data.get("scuola"), stato="in_attesa")
-    if len(nu.username) < 3: return jsonify({"error":"Username troppo corto"}), 400
-    if User.query.filter_by(username=nu.username).first(): return jsonify({"error":"Username già in uso"}), 400
-    db.session.add(nu); db.session.commit(); log_audit("reg_admin_create")
-    return jsonify({"success":True,"richiesta":nu.to_dict()})
+    if len(nu.username) < 3: return jsonify({"error": "Username troppo corto"}), 400
+    if User.query.filter_by(username=nu.username).first(): return jsonify({"error": "Username già in uso"}), 400
+    db.session.add(nu)
+    db.session.commit()
+    log_audit("reg_admin_create")
+    return jsonify({"success": True, "richiesta": nu.to_dict()})
 
 @app.route("/api/registrazioni/<int:id>", methods=["PUT", "DELETE"])
 def api_registrazioni_gestisci(id):
-    if not admin_required(): return jsonify({"error":"Solo admin"}), 403
+    if not admin_required(): return jsonify({"error": "Solo admin"}), 403
     reg = RegistrationRequest.query.get(id)
-    if not reg: return jsonify({"error":"Non trovata"}), 404
-    if request.method == "DELETE": db.session.delete(reg); db.session.commit(); return jsonify({"success":True})
+    if not reg: return jsonify({"error": "Non trovata"}), 404
+    if request.method == "DELETE":
+        db.session.delete(reg)
+        db.session.commit()
+        return jsonify({"success": True})
     if request.method == "PUT":
         data = request.get_json()
-        if data.get("stato") in ["approvato","rifiutato"]:
-            reg.stato, reg.admin_note = data["stato"], data.get("admin_note","")
+        if data.get("stato") in ["approvato", "rifiutato"]:
+            reg.stato, reg.admin_note = data["stato"], data.get("admin_note", "")
             if data["stato"] == "approvato":
                 reg.data_approvazione = datetime.now()
                 nuovo_user = User(username=reg.username, password=reg.password, email=reg.email,
@@ -1266,243 +1378,267 @@ def api_registrazioni_gestisci(id):
                                   stato="attivo", account_status="attivo", created_at=datetime.now())
                 db.session.add(nuovo_user)
                 crea_notifica(reg.username, "registrazione", "✅ Registrazione approvata", "Il tuo account è attivo!", "/login")
-            db.session.commit(); return jsonify({"success":True})
-        return jsonify({"error":"Stato non valido"}), 400
+            db.session.commit()
+            return jsonify({"success": True})
+        return jsonify({"error": "Stato non valido"}), 400
 
 @app.route("/api/registrazioni/<int:id>/modifica", methods=["PUT"])
 def api_registrazioni_modifica(id):
-    if not admin_required(): return jsonify({"error":"Solo admin"}), 403
+    if not admin_required(): return jsonify({"error": "Solo admin"}), 403
     reg = RegistrationRequest.query.get(id)
-    if not reg: return jsonify({"error":"Non trovata"}), 404
+    if not reg: return jsonify({"error": "Non trovata"}), 404
     data = request.get_json()
-    for campo in ["username","email","nome_cognome","scuola"]:
+    for campo in ["username", "email", "nome_cognome", "scuola"]:
         if campo in data: setattr(reg, campo, data[campo])
     if "password" in data and data["password"]: reg.password = password_hash(data["password"])
-    db.session.commit(); return jsonify({"success":True})
+    db.session.commit()
+    return jsonify({"success": True})
 
 # =====================================================
 # ============= API - UTENTI ==========================
 # =====================================================
-
 @app.route("/api/utenti", methods=["GET"])
 def api_utenti_lista():
-    if not admin_required(): return jsonify({"error":"Solo admin"}), 403
+    if not admin_required(): return jsonify({"error": "Solo admin"}), 403
     utenti = User.query.all()
-    return jsonify([{"id":u.id,"username":u.username,"role":u.role,
-                     "account_status": getattr(u,"account_status","attivo"),
-                     "created_at":u.created_at.strftime("%Y-%m-%d %H:%M:%S") if u.created_at else "N/A",
-                     "voti_count":Vote.query.filter_by(username=u.username).count(),
-                     "recensioni_count":Review.query.filter_by(username=u.username).count()} for u in utenti])
+    return jsonify([{"id": u.id, "username": u.username, "role": u.role,
+                     "account_status": getattr(u, "account_status", "attivo"),
+                     "created_at": u.created_at.strftime("%Y-%m-%d %H:%M:%S") if u.created_at else "N/A",
+                     "voti_count": Vote.query.filter_by(username=u.username).count(),
+                     "recensioni_count": Review.query.filter_by(username=u.username).count()} for u in utenti])
 
 @app.route("/api/ruoli", methods=["GET", "POST"])
 def api_ruoli():
     if request.method == "GET":
         rows = RoleDef.query.order_by(RoleDef.nome.asc()).all()
         return jsonify([{"id": r.id, "nome": r.nome, "is_system": bool(r.is_system)} for r in rows])
-    if not admin_required(): return jsonify({"error":"Solo admin"}), 403
+    if not admin_required(): return jsonify({"error": "Solo admin"}), 403
     data = request.get_json(force=True, silent=True) or {}
     nome = (data.get("nome") or "").strip().lower()
-    if not nome or len(nome) < 3: return jsonify({"error":"Nome ruolo non valido"}), 400
-    if nome in ("admin","user"): return jsonify({"error":"Ruolo di sistema"}), 400
-    if RoleDef.query.filter_by(nome=nome).first(): return jsonify({"error":"Ruolo già esistente"}), 400
-    r = RoleDef(nome=nome, is_system=False); db.session.add(r); db.session.commit()
-    return jsonify({"success":True,"ruolo":{"id":r.id,"nome":r.nome}})
+    if not nome or len(nome) < 3: return jsonify({"error": "Nome ruolo non valido"}), 400
+    if nome in ("admin", "user"): return jsonify({"error": "Ruolo di sistema"}), 400
+    if RoleDef.query.filter_by(nome=nome).first(): return jsonify({"error": "Ruolo già esistente"}), 400
+    r = RoleDef(nome=nome, is_system=False)
+    db.session.add(r)
+    db.session.commit()
+    return jsonify({"success": True, "ruolo": {"id": r.id, "nome": r.nome}})
 
 @app.route("/api/ruoli/<int:rid>", methods=["PUT", "DELETE"])
 def api_ruoli_mod(rid):
-    if not admin_required(): return jsonify({"error":"Solo admin"}), 403
+    if not admin_required(): return jsonify({"error": "Solo admin"}), 403
     r = RoleDef.query.get(rid)
-    if not r: return jsonify({"error":"Ruolo non trovato"}), 404
+    if not r: return jsonify({"error": "Ruolo non trovato"}), 404
     if r.nome in ("admin", "user") and not is_founder_user(session.get("username")):
-        return jsonify({"error":"Solo il founder può modificare i ruoli di sistema"}), 403
+        return jsonify({"error": "Solo il founder può modificare i ruoli di sistema"}), 403
     if request.method == "DELETE":
         if User.query.filter_by(role=r.nome).count() > 0:
-            return jsonify({"error":"Ruolo assegnato ad almeno un utente"}), 400
-        db.session.delete(r); db.session.commit(); return jsonify({"success":True})
+            return jsonify({"error": "Ruolo assegnato ad almeno un utente"}), 400
+        db.session.delete(r)
+        db.session.commit()
+        return jsonify({"success": True})
     data = request.get_json(force=True, silent=True) or {}
     nome = (data.get("nome") or "").strip().lower()
-    if not nome or len(nome) < 3: return jsonify({"error":"Nome ruolo non valido"}), 400
-    if nome in ("admin","user"): return jsonify({"error":"Nome ruolo non consentito"}), 400
-    if RoleDef.query.filter(RoleDef.nome == nome, RoleDef.id != r.id).first(): return jsonify({"error":"Ruolo già esistente"}), 400
-    old = r.nome; r.nome = nome
+    if not nome or len(nome) < 3: return jsonify({"error": "Nome ruolo non valido"}), 400
+    if nome in ("admin", "user"): return jsonify({"error": "Nome ruolo non consentito"}), 400
+    if RoleDef.query.filter(RoleDef.nome == nome, RoleDef.id != r.id).first(): return jsonify({"error": "Ruolo già esistente"}), 400
+    old = r.nome
+    r.nome = nome
     User.query.filter_by(role=old).update({"role": nome})
     db.session.commit()
-    return jsonify({"success":True})
+    return jsonify({"success": True})
 
 @app.route("/api/materie", methods=["GET", "POST"])
 def api_materie():
     if request.method == "GET":
         return jsonify([m.to_dict() for m in Subject.query.order_by(Subject.nome.asc()).all()])
-    if not admin_required(): return jsonify({"error":"Solo admin"}), 403
+    if not admin_required(): return jsonify({"error": "Solo admin"}), 403
     data = request.get_json(force=True, silent=True) or {}
     nome = (data.get("nome") or "").strip()
-    if not nome: return jsonify({"error":"Nome materia obbligatorio"}), 400
-    tax_upsert_subject(nome, session.get("username")); db.session.commit()
-    return jsonify({"success":True})
+    if not nome: return jsonify({"error": "Nome materia obbligatorio"}), 400
+    tax_upsert_subject(nome, session.get("username"))
+    db.session.commit()
+    return jsonify({"success": True})
 
 @app.route("/api/materie/<int:mid>", methods=["PUT", "DELETE"])
 def api_materie_mod(mid):
-    if not admin_required(): return jsonify({"error":"Solo admin"}), 403
+    if not admin_required(): return jsonify({"error": "Solo admin"}), 403
     m = Subject.query.get(mid)
-    if not m: return jsonify({"error":"Materia non trovata"}), 404
+    if not m: return jsonify({"error": "Materia non trovata"}), 404
     if request.method == "DELETE":
-        db.session.delete(m); db.session.commit(); return jsonify({"success":True})
+        db.session.delete(m)
+        db.session.commit()
+        return jsonify({"success": True})
     data = request.get_json(force=True, silent=True) or {}
     nome = (data.get("nome") or "").strip()
-    if not nome: return jsonify({"error":"Nome materia obbligatorio"}), 400
-    m.nome = nome[:120]; db.session.commit(); return jsonify({"success":True})
+    if not nome: return jsonify({"error": "Nome materia obbligatorio"}), 400
+    m.nome = nome[:120]
+    db.session.commit()
+    return jsonify({"success": True})
 
 @app.route("/api/scuole", methods=["GET", "POST"])
 def api_scuole():
     if request.method == "GET":
         return jsonify([s.to_dict() for s in School.query.order_by(School.nome.asc()).all()])
-    if not admin_required(): return jsonify({"error":"Solo admin"}), 403
+    if not admin_required(): return jsonify({"error": "Solo admin"}), 403
     data = request.get_json(force=True, silent=True) or {}
     nome = (data.get("nome") or "").strip()
-    if not nome: return jsonify({"error":"Nome scuola obbligatorio"}), 400
-    tax_upsert_school(nome, session.get("username")); db.session.commit()
-    return jsonify({"success":True})
+    if not nome: return jsonify({"error": "Nome scuola obbligatorio"}), 400
+    tax_upsert_school(nome, session.get("username"))
+    db.session.commit()
+    return jsonify({"success": True})
 
 @app.route("/api/scuole/<int:sid>", methods=["PUT", "DELETE"])
 def api_scuole_mod(sid):
-    if not admin_required(): return jsonify({"error":"Solo admin"}), 403
+    if not admin_required(): return jsonify({"error": "Solo admin"}), 403
     s = School.query.get(sid)
-    if not s: return jsonify({"error":"Scuola non trovata"}), 404
+    if not s: return jsonify({"error": "Scuola non trovata"}), 404
     if request.method == "DELETE":
-        db.session.delete(s); db.session.commit(); return jsonify({"success":True})
+        db.session.delete(s)
+        db.session.commit()
+        return jsonify({"success": True})
     data = request.get_json(force=True, silent=True) or {}
     nome = (data.get("nome") or "").strip()
-    if not nome: return jsonify({"error":"Nome scuola obbligatorio"}), 400
-    s.nome = nome[:180]; db.session.commit(); return jsonify({"success":True})
+    if not nome: return jsonify({"error": "Nome scuola obbligatorio"}), 400
+    s.nome = nome[:180]
+    db.session.commit()
+    return jsonify({"success": True})
 
 @app.route("/api/utenti/<int:user_id>", methods=["PUT", "DELETE"])
 def api_utenti_mod(user_id):
-    if not admin_required(): return jsonify({"error":"Solo admin"}), 403
+    if not admin_required(): return jsonify({"error": "Solo admin"}), 403
     utente = User.query.get(user_id)
-    if not utente: return jsonify({"error":"Non trovato"}), 404
+    if not utente: return jsonify({"error": "Non trovato"}), 404
     if is_founder_user(utente.username) and session.get("username") != utente.username:
-        return jsonify({"error":"L'account founder può essere gestito solo dal proprietario"}), 403
+        return jsonify({"error": "L'account founder può essere gestito solo dal proprietario"}), 403
     if request.method == "DELETE":
         if is_founder_user(utente.username):
-            return jsonify({"error":"Impossibile eliminare account founder"}), 403
-        username_eliminato = utente.username; db.session.delete(utente); db.session.commit()
-        return jsonify({"success":True,"message":f"Utente {username_eliminato} eliminato"})
+            return jsonify({"error": "Impossibile eliminare account founder"}), 403
+        username_eliminato = utente.username
+        db.session.delete(utente)
+        db.session.commit()
+        return jsonify({"success": True, "message": f"Utente {username_eliminato} eliminato"})
     if request.method == "PUT":
         data = request.get_json()
-        if "role" in data and (RoleDef.query.filter_by(nome=data["role"]).first() or data["role"] in ("user","admin")):
-            utente.role = data["role"]; db.session.commit()
-            return jsonify({"success":True,"message":f"Ruolo aggiornato a {data['role']}"})
-        return jsonify({"error":"Dati non validi"}), 400
+        if "role" in data and (RoleDef.query.filter_by(nome=data["role"]).first() or data["role"] in ("user", "admin")):
+            utente.role = data["role"]
+            db.session.commit()
+            return jsonify({"success": True, "message": f"Ruolo aggiornato a {data['role']}"})
+        return jsonify({"error": "Dati non validi"}), 400
 
 @app.route("/api/utenti/crea", methods=["POST"])
 def api_utenti_crea():
-    if not admin_required(): return jsonify({"error":"Solo admin"}), 403
+    if not admin_required(): return jsonify({"error": "Solo admin"}), 403
     data = request.get_json()
-    username, password, role = data.get("username","").strip(), data.get("password","").strip(), data.get("role","user")
-    if not username or not password: return jsonify({"error":"Username e password richiesti"}), 400
-    if not (RoleDef.query.filter_by(nome=role).first() or role in ("user","admin")): return jsonify({"error":"Ruolo non valido"}), 400
-    if User.query.filter_by(username=username).first(): return jsonify({"error":"Username già esistente"}), 400
+    username, password, role = data.get("username", "").strip(), data.get("password", "").strip(), data.get("role", "user")
+    if not username or not password: return jsonify({"error": "Username e password richiesti"}), 400
+    if not (RoleDef.query.filter_by(nome=role).first() or role in ("user", "admin")): return jsonify({"error": "Ruolo non valido"}), 400
+    if User.query.filter_by(username=username).first(): return jsonify({"error": "Username già esistente"}), 400
     nuovo = User(username=username, password=password_hash(password), role=role, account_status="attivo", created_at=datetime.now())
-    db.session.add(nuovo); db.session.commit()
-    return jsonify({"success":True,"message":f"Utente {username} creato"})
+    db.session.add(nuovo)
+    db.session.commit()
+    return jsonify({"success": True, "message": f"Utente {username} creato"})
 
 @app.route("/api/utenti/<int:user_id>/credenziali", methods=["PUT"])
 def api_utenti_modifica_credenziali(user_id):
-    if not admin_required(): return jsonify({"error":"Solo admin"}), 403
+    if not admin_required(): return jsonify({"error": "Solo admin"}), 403
     utente = User.query.get(user_id)
-    if not utente: return jsonify({"error":"Non trovato"}), 404
+    if not utente: return jsonify({"error": "Non trovato"}), 404
     if is_founder_user(utente.username) and session.get("username") != utente.username:
-        return jsonify({"error":"L'account founder può essere gestito solo dal proprietario"}), 403
+        return jsonify({"error": "L'account founder può essere gestito solo dal proprietario"}), 403
     data = request.get_json()
     if "username" in data and data["username"].strip():
-        if User.query.filter_by(username=data["username"].strip()).first(): return jsonify({"error":"Username già esistente"}), 400
+        if User.query.filter_by(username=data["username"].strip()).first(): return jsonify({"error": "Username già esistente"}), 400
         utente.username = data["username"].strip()
     if "password" in data and data["password"]: utente.password = password_hash(data["password"])
-    db.session.commit(); return jsonify({"success":True,"username":utente.username})
+    db.session.commit()
+    return jsonify({"success": True, "username": utente.username})
 
 @app.route("/api/utenti-anagrafica/<int:user_id>", methods=["GET", "PUT"])
 def api_utenti_anagrafica(user_id):
-    if not login_required(): return jsonify({"error":"Non autorizzato"}), 403
+    if not login_required(): return jsonify({"error": "Non autorizzato"}), 403
     utente = User.query.get(user_id)
-    if not utente: return jsonify({"error":"Non trovato"}), 404
+    if not utente: return jsonify({"error": "Non trovato"}), 404
     if request.method == "GET":
-        stats = {"voti_count":Vote.query.filter_by(username=utente.username).count(),
-                 "recensioni_count":Review.query.filter_by(username=utente.username).count(),
-                 "sessioni_attive":SessionLog.query.filter_by(username=utente.username).count()}
+        stats = {"voti_count": Vote.query.filter_by(username=utente.username).count(),
+                 "recensioni_count": Review.query.filter_by(username=utente.username).count(),
+                 "sessioni_attive": SessionLog.query.filter_by(username=utente.username).count()}
         last_login = SessionLog.query.filter_by(username=utente.username).order_by(SessionLog.login_time.desc()).first()
         return jsonify({**utente.to_dict(include_sensitive=admin_required()),
-                        "last_login":last_login.login_time.strftime("%Y-%m-%d %H:%M:%S") if last_login else "N/A", **stats})
+                        "last_login": last_login.login_time.strftime("%Y-%m-%d %H:%M:%S") if last_login else "N/A", **stats})
     elif request.method == "PUT":
-        if not admin_required(): return jsonify({"error":"Solo admin"}), 403
+        if not admin_required(): return jsonify({"error": "Solo admin"}), 403
         if is_founder_user(utente.username) and session.get("username") != utente.username:
-            return jsonify({"error":"L'account founder può essere gestito solo dal proprietario"}), 403
+            return jsonify({"error": "L'account founder può essere gestito solo dal proprietario"}), 403
         data = request.get_json()
         if "role" in data and data["role"] and not RoleDef.query.filter_by(nome=data["role"]).first():
-            return jsonify({"error":"Ruolo non valido"}), 400
-        for campo in ["email","nome_cognome","scuola","telefono","data_nascita","indirizzo","citta","cap","account_status","admin_note","role"]:
+            return jsonify({"error": "Ruolo non valido"}), 400
+        for campo in ["email", "nome_cognome", "scuola", "telefono", "data_nascita", "indirizzo", "citta", "cap", "account_status", "admin_note", "role"]:
             if campo in data: setattr(utente, campo, data[campo])
         if "password" in data and data["password"]: utente.password = password_hash(data["password"])
         db.session.commit()
         if "account_status" in data or "role" in data:
-            msg = {"sospeso":"Il tuo account è stato sospeso.","bannato":"Il tuo account è stato bannato.","attivo":"Il tuo account è stato riattivato."}.get(data.get("account_status"))
-            if msg: crea_notifica(utente.username, "sistema", "⚙️ Stato account aggiornato", msg, "/user" if data.get("account_status")=="attivo" else "/login")
-        return jsonify({"success":True})
+            msg = {"sospeso": "Il tuo account è stato sospeso.", "bannato": "Il tuo account è stato bannato.", "attivo": "Il tuo account è stato riattivato."}.get(data.get("account_status"))
+            if msg: crea_notifica(utente.username, "sistema", "⚙️ Stato account aggiornato", msg, "/user" if data.get("account_status") == "attivo" else "/login")
+        return jsonify({"success": True})
 
 @app.route("/api/profilo", methods=["GET", "PUT"])
 def api_profilo():
-    if not login_required(): return jsonify({"error":"Non autorizzato"}), 403
+    if not login_required(): return jsonify({"error": "Non autorizzato"}), 403
     utente = User.query.filter_by(username=session["username"]).first()
-    if not utente: return jsonify({"error":"Non trovato"}), 404
+    if not utente: return jsonify({"error": "Non trovato"}), 404
     if request.method == "GET":
         pend = bool(PrivacyRequest.query.filter_by(username=utente.username, stato="pending").first())
         av = (utente.avatar_file or "").strip()
         av_url = (url_for("uploads_avatars_public", fname=av, _external=False) if av else None)
-        return jsonify({"username":utente.username,"email":utente.email,"nome_cognome":utente.nome_cognome,
-                        "scuola":utente.scuola,"role":utente.role,
-                        "telefono":utente.telefono,"data_nascita":utente.data_nascita,"indirizzo":utente.indirizzo,
-                        "citta":utente.citta,"cap":utente.cap,"avatar_preset":utente.avatar_preset or 0,
-                        "avatar_url":av_url,"oauth_provider":utente.oauth_provider,
-                        "created_at":utente.created_at.strftime("%Y-%m-%d %H:%M:%S") if utente.created_at else "N/A",
-                        "richiesta_cancellazione_pending":pend})
+        return jsonify({"username": utente.username, "email": utente.email, "nome_cognome": utente.nome_cognome,
+                        "scuola": utente.scuola, "role": utente.role,
+                        "telefono": utente.telefono, "data_nascita": utente.data_nascita, "indirizzo": utente.indirizzo,
+                        "citta": utente.citta, "cap": utente.cap, "avatar_preset": utente.avatar_preset or 0,
+                        "avatar_url": av_url, "oauth_provider": utente.oauth_provider,
+                        "created_at": utente.created_at.strftime("%Y-%m-%d %H:%M:%S") if utente.created_at else "N/A",
+                        "richiesta_cancellazione_pending": pend})
     elif request.method == "PUT":
         data = request.get_json(force=True, silent=True) or {}
         if "email" in data and data["email"]:
-            if "@" not in str(data["email"]): return jsonify({"error":"Email non valida"}), 400
-            if User.query.filter(User.email==data["email"], User.username!=utente.username).first():
-                return jsonify({"error":"Email già usata"}), 400
+            if "@" not in str(data["email"]): return jsonify({"error": "Email non valida"}), 400
+            if User.query.filter(User.email == data["email"], User.username != utente.username).first():
+                return jsonify({"error": "Email già usata"}), 400
             utente.email = data["email"].strip()
         if "nome_cognome" in data: utente.nome_cognome = (data.get("nome_cognome") or "").strip() or utente.nome_cognome
         if "scuola" in data: utente.scuola = (data.get("scuola") or "").strip() or utente.scuola
-        for fld in ("telefono","data_nascita","indirizzo","citta","cap"):
+        for fld in ("telefono", "data_nascita", "indirizzo", "citta", "cap"):
             if fld in data: setattr(utente, fld, (data.get(fld) or "").strip() or None)
         if "avatar_preset" in data:
             try: utente.avatar_preset = max(0, min(24, int(data.get("avatar_preset") or 0)))
             except (TypeError, ValueError): pass
         if "password" in data and data["password"]:
-            if len(str(data["password"])) < 4: return jsonify({"error":"Password minima 4 caratteri"}), 400
+            if len(str(data["password"])) < 4: return jsonify({"error": "Password minima 4 caratteri"}), 400
             utente.password = password_hash(data["password"])
         if data.get("rimuovi_oauth"):
             utente.oauth_provider, utente.oauth_sub = None, None
-        db.session.commit(); log_audit("profilo_aggiornato", target_username=session["username"])
-        return jsonify({"success":True})
+        db.session.commit()
+        log_audit("profilo_aggiornato", target_username=session["username"])
+        return jsonify({"success": True})
 
 @app.route("/api/profilo/avatar", methods=["POST"])
 def api_profilo_avatar_upload():
-    if not login_required(): return jsonify({"error":"Non autorizzato"}), 403
+    if not login_required(): return jsonify({"error": "Non autorizzato"}), 403
     if not spam_allow(session.get("username"), "avatar_up", 8, 3600):
-        return jsonify({"error":"Troppi caricamenti, riprova più tardi."}), 429
+        return jsonify({"error": "Troppi caricamenti, riprova più tardi."}), 429
     utente = User.query.filter_by(username=session["username"]).first()
-    if not utente: return jsonify({"error":"Non trovato"}), 404
+    if not utente: return jsonify({"error": "Non trovato"}), 404
     f = request.files.get("file")
-    if not f or not f.filename: return jsonify({"error":"File mancante"}), 400
-    ext = f.filename.rsplit(".",1)[-1].lower() if "." in f.filename else ""
-    if ext not in ("png","jpg","jpeg","gif","webp"):
-        return jsonify({"error":"Formato non consentito"}), 400
-    fn = f"{utente.username}_{uuid.uuid4().hex}.{ext}"; safe = secure_filename(fn)
+    if not f or not f.filename: return jsonify({"error": "File mancante"}), 400
+    ext = f.filename.rsplit(".", 1)[-1].lower() if "." in f.filename else ""
+    if ext not in ("png", "jpg", "jpeg", "gif", "webp"):
+        return jsonify({"error": "Formato non consentito"}), 400
+    fn = f"{utente.username}_{uuid.uuid4().hex}.{ext}"
+    safe = secure_filename(fn)
     path = os.path.join(AVATAR_FOLDER, safe)
     f.save(path)
-    if os.path.getsize(path) > 2*1024*1024:
-        os.remove(path); return jsonify({"error":"File troppo grande (max 2MB)"}), 400
+    if os.path.getsize(path) > 2 * 1024 * 1024:
+        os.remove(path)
+        return jsonify({"error": "File troppo grande (max 2MB)"}), 400
     old = (utente.avatar_file or "").strip()
     if old:
         op = os.path.join(AVATAR_FOLDER, secure_filename(old))
@@ -1510,12 +1646,33 @@ def api_profilo_avatar_upload():
             if os.path.isfile(op): os.remove(op)
         except OSError:
             pass
-    utente.avatar_file = safe; db.session.commit()
-    return jsonify({"success":True,"avatar_url":url_for("uploads_avatars_public", fname=safe)})
+    utente.avatar_file = safe
+    db.session.commit()
+    return jsonify({"success": True, "avatar_url": url_for("uploads_avatars_public", fname=safe)})
+
+@app.route("/api/profilo/elimina", methods=["POST"])
+def api_profilo_elimina_account():
+    if not login_required(): return jsonify({"error": "Non autorizzato"}), 403
+    utente = User.query.filter_by(username=session["username"]).first()
+    if not utente: return jsonify({"error": "Non trovato"}), 404
+    if is_founder_user(utente.username):
+        return jsonify({"error": "L'account founder non puo essere eliminato autonomamente."}), 403
+    data = request.get_json(force=True, silent=True) or {}
+    password = data.get("password") or ""
+    conferma = (data.get("conferma") or "").strip()
+    if conferma != "ELIMINA":
+        return jsonify({"error": "Scrivi ELIMINA per confermare."}), 400
+    if utente.oauth_provider is None and not password_verifica(password, utente.password):
+        return jsonify({"error": "Password non valida."}), 403
+    username = utente.username
+    log_audit("account_self_delete_requested", target_username=username)
+    elimina_utente_totale(username)
+    session.clear()
+    return jsonify({"success": True, "message": "Account eliminato. Le recensioni pubblicate sono state anonimizzate."})
 
 @app.route("/api/me/access-log", methods=["GET"])
 def api_me_access_log():
-    if not login_required(): return jsonify({"error":"Non autorizzato"}), 403
+    if not login_required(): return jsonify({"error": "Non autorizzato"}), 403
     lim = min(int(request.args.get("limit", "40")), 200)
     rows = (LoginHistory.query.filter_by(username=session["username"]).order_by(LoginHistory.quando.desc())
             .limit(lim).all())
@@ -1524,64 +1681,68 @@ def api_me_access_log():
 # =====================================================
 # ============= API - VOTI ============================
 # =====================================================
-
 @app.route("/api/storico-voti", methods=["GET"])
 def api_storico_voti():
-    if not login_required(): return jsonify({"error":"Non autorizzato"}), 403
+    if not login_required(): return jsonify({"error": "Non autorizzato"}), 403
     voti = Vote.query.filter_by(username=session["username"]).all()
     return jsonify([v.to_dict() for v in voti])
 
 @app.route("/api/voti", methods=["GET", "POST"])
 def api_voti():
-    if not login_required(): return jsonify({"error":"Non autorizzato"}), 403
+    if not login_required(): return jsonify({"error": "Non autorizzato"}), 403
     if request.method == "POST":
         nuovo = request.get_json(force=True, silent=True) or {}
         target_user = session["username"]
         if admin_required() and (nuovo.get("username") or "").strip():
             target_user = nuovo["username"].strip()
-        if not User.query.filter_by(username=target_user).first():
-            return jsonify({"error":"Utente non trovato"}), 404
+            if not User.query.filter_by(username=target_user).first():
+                return jsonify({"error": "Utente non trovato"}), 404
         voto = Vote(username=target_user, voto=str(nuovo.get("voto")), nomeProf=(nuovo.get("nomeProf") or "").strip(),
                     materia=(nuovo.get("materia") or "").strip(), scuola=(nuovo.get("scuola") or "").strip() or None)
-        db.session.add(voto); db.session.commit(); log_audit("voto_creato", target_username=target_user)
-        return jsonify({"success":True})
+        db.session.add(voto)
+        db.session.commit()
+        log_audit("voto_creato", target_username=target_user)
+        return jsonify({"success": True})
     query = Vote.query
-    materia, scuola = request.args.get("materia","").strip().lower(), request.args.get("scuola","").strip().lower()
+    materia, scuola = request.args.get("materia", "").strip().lower(), request.args.get("scuola", "").strip().lower()
     if materia: query = query.filter(Vote.materia.ilike(f"%{materia}%"))
     if scuola: query = query.filter(Vote.scuola.ilike(f"%{scuola}%"))
     return jsonify([v.to_dict() for v in query.all()])
 
 @app.route("/api/voti/<int:voto_id>", methods=["PUT", "DELETE"])
 def api_voti_mod(voto_id):
-    if not login_required(): return jsonify({"error":"Non autorizzato"}), 403
+    if not login_required(): return jsonify({"error": "Non autorizzato"}), 403
     voto = Vote.query.get(voto_id)
-    if not voto: return jsonify({"error":"Non trovato"}), 404
+    if not voto: return jsonify({"error": "Non trovato"}), 404
     if session["role"] != "admin" and voto.username != session["username"]:
-        return jsonify({"error":"Puoi modificare solo i tuoi voti"}), 403
-    if request.method == "DELETE": db.session.delete(voto); db.session.commit(); return jsonify({"success":True})
+        return jsonify({"error": "Puoi modificare solo i tuoi voti"}), 403
+    if request.method == "DELETE":
+        db.session.delete(voto)
+        db.session.commit()
+        return jsonify({"success": True})
     if request.method == "PUT":
         data = request.json
-        for campo in ["voto","nomeProf","materia","scuola"]:
+        for campo in ["voto", "nomeProf", "materia", "scuola"]:
             if campo in data: setattr(voto, campo, data[campo])
-        db.session.commit(); return jsonify({"success":True})
+        db.session.commit()
+        return jsonify({"success": True})
 
 # =====================================================
 # ============= API - RECENSIONI ======================
 # =====================================================
-
 @app.route("/api/recensioni", methods=["GET", "POST"])
 @limiter.limit("180/day;40/hour", methods=["POST"])
 def api_recensioni():
-    if not login_required(): return jsonify({"error":"Non autorizzato"}), 403
+    if not login_required(): return jsonify({"error": "Non autorizzato"}), 403
     if request.method == "POST":
         if not spam_allow(session.get("username"), "review_post", 25, 86400):
-            return jsonify({"error":"Limite giornaliero recensioni raggiunto. Riprova domani."}), 429
+            return jsonify({"error": "Limite giornaliero recensioni raggiunto. Riprova domani."}), 429
         nuovo = request.get_json(force=True, silent=True) or {}
         target_user = session["username"]
         if admin_required() and (nuovo.get("username") or "").strip():
             target_user = nuovo["username"].strip()
-        if not User.query.filter_by(username=target_user).first():
-            return jsonify({"error":"Utente non trovato"}), 404
+            if not User.query.filter_by(username=target_user).first():
+                return jsonify({"error": "Utente non trovato"}), 404
         pid = nuovo.get("professor_id")
         try:
             pid_i = int(pid) if pid not in (None, "", []) else None
@@ -1591,79 +1752,96 @@ def api_recensioni():
                      scuola=(nuovo.get("scuola") or "").strip() or None,
                      recensione=(nuovo.get("recensione") or "").strip(), likes=0, dislikes=0, user_likes=[], user_dislikes=[], commenti=[],
                      is_anonymous=bool(nuovo.get("is_anonymous")), professor_id=pid_i or None)
-        db.session.add(rec); db.session.commit()
-        notify_favorites_new_review(rec); log_audit("recensione_creata", target_username=target_user)
-        return jsonify({"success":True,"id":rec.id})
+        db.session.add(rec)
+        db.session.commit()
+        notify_favorites_new_review(rec)
+        log_audit("recensione_creata", target_username=target_user)
+        return jsonify({"success": True, "id": rec.id})
     query = Review.query
-    scuola, prof = request.args.get("scuola","").strip().lower(), request.args.get("prof","").strip().lower()
+    scuola, prof = request.args.get("scuola", "").strip().lower(), request.args.get("prof", "").strip().lower()
     if scuola: query = query.filter(Review.scuola.ilike(f"%{scuola}%"))
     if prof: query = query.filter(Review.nomeProfRec.ilike(f"%{prof}%"))
-    righe = query.all(); users = {u.username: u.role for u in User.query.all()}
+    righe = query.all()
+    users = {u.username: u.role for u in User.query.all()}
     return jsonify([{**recensioni_mask_row(r), "user_role": users.get(r.username, "user")} for r in righe])
 
 @app.route("/api/recensioni/<int:rec_id>", methods=["PUT", "DELETE"])
 def api_recensioni_mod(rec_id):
-    if not login_required(): return jsonify({"error":"Non autorizzato"}), 403
+    if not login_required(): return jsonify({"error": "Non autorizzato"}), 403
     rec = Review.query.get(rec_id)
-    if not rec: return jsonify({"error":"Non trovata"}), 404
+    if not rec: return jsonify({"error": "Non trovata"}), 404
     if session["role"] != "admin" and rec.username != session["username"]:
-        return jsonify({"error":"Puoi modificare solo le tue recensioni"}), 403
-    if request.method == "DELETE": db.session.delete(rec); db.session.commit(); return jsonify({"success":True})
+        return jsonify({"error": "Puoi modificare solo le tue recensioni"}), 403
+    if request.method == "DELETE":
+        db.session.delete(rec)
+        db.session.commit()
+        return jsonify({"success": True})
     if request.method == "PUT":
         data = request.json
-        for campo in ["recensione","nomeProfRec","scuola"]:
+        for campo in ["recensione", "nomeProfRec", "scuola"]:
             if campo in data: setattr(rec, campo, data[campo])
         if "is_anonymous" in data:
             rec.is_anonymous = bool(data["is_anonymous"])
         if data.get("professor_id") is not None:
             try: rec.professor_id = int(data["professor_id"]) if data["professor_id"] not in ("", None) else None
             except (TypeError, ValueError): pass
-        db.session.commit(); return jsonify({"success":True})
+        db.session.commit()
+        return jsonify({"success": True})
 
 @app.route("/api/recensioni/<int:rec_id>/like", methods=["POST"])
 @limiter.limit("800/day;120/hour", methods=["POST"])
 def api_recensioni_like(rec_id):
-    if not login_required(): return jsonify({"error":"Non autorizzato"}), 403
+    if not login_required(): return jsonify({"error": "Non autorizzato"}), 403
     rec = Review.query.get(rec_id)
-    if not rec: return jsonify({"error":"Non trovata"}), 404
+    if not rec: return jsonify({"error": "Non trovata"}), 404
     if not spam_allow(session.get("username"), "rec_like", 600, 86400):
-        return jsonify({"error":"Troppe azioni ravvicinate sulle recensioni."}), 429
-    data = request.get_json() or {}; username = session["username"]; azione = data.get("azione")
-    likes_l = list(rec.user_likes or []); dis_l = list(rec.user_dislikes or [])
-    if username in likes_l: likes_l.remove(username); rec.likes = max(0, (rec.likes or 0) - 1)
-    if username in dis_l: dis_l.remove(username); rec.dislikes = max(0, (rec.dislikes or 0) - 1)
+        return jsonify({"error": "Troppe azioni ravvicinate sulle recensioni."}), 429
+    data = request.get_json() or {}
+    username = session["username"]
+    azione = data.get("azione")
+    likes_l = list(rec.user_likes or [])
+    dis_l = list(rec.user_dislikes or [])
+    if username in likes_l:
+        likes_l.remove(username)
+        rec.likes = max(0, (rec.likes or 0) - 1)
+    if username in dis_l:
+        dis_l.remove(username)
+        rec.dislikes = max(0, (rec.dislikes or 0) - 1)
     if azione == "like" and username not in likes_l:
-        likes_l.append(username); rec.likes = (rec.likes or 0) + 1
+        likes_l.append(username)
+        rec.likes = (rec.likes or 0) + 1
     elif azione == "dislike" and username not in dis_l:
-        dis_l.append(username); rec.dislikes = (rec.dislikes or 0) + 1
+        dis_l.append(username)
+        rec.dislikes = (rec.dislikes or 0) + 1
     rec.user_likes, rec.user_dislikes = likes_l, dis_l
     db.session.commit()
-    return jsonify({"success":True,"likes":rec.likes,"dislikes":rec.dislikes})
+    return jsonify({"success": True, "likes": rec.likes, "dislikes": rec.dislikes})
 
 @app.route("/api/recensioni/<int:rec_id>/commenti", methods=["GET", "POST"])
 @limiter.limit("500/day;120/hour", methods=["POST"])
 def api_recensioni_commenti(rec_id):
-    if not login_required(): return jsonify({"error":"Non autorizzato"}), 403
+    if not login_required(): return jsonify({"error": "Non autorizzato"}), 403
     rec = Review.query.get(rec_id)
-    if not rec: return jsonify({"error":"Non trovata"}), 404
+    if not rec: return jsonify({"error": "Non trovata"}), 404
     if request.method == "GET": return jsonify(rec.commenti if rec.commenti is not None else [])
     elif request.method == "POST":
         if not spam_allow(session.get("username"), "review_comment_post", 80, 86400):
-            return jsonify({"error":"Limite giornaliero commenti."}), 429
-        data = request.get_json() or {}; testo = data.get("testo","").strip()
+            return jsonify({"error": "Limite giornaliero commenti."}), 429
+        data = request.get_json() or {}
+        testo = data.get("testo", "").strip()
         parent_raw = data.get("parent_id")
         parent_id = None
         try:
             parent_id = int(parent_raw) if parent_raw not in (None, "") else None
         except (TypeError, ValueError):
             parent_id = None
-        if not testo: return jsonify({"error":"Commento vuoto"}), 400
+        if not testo: return jsonify({"error": "Commento vuoto"}), 400
         comms = list(rec.commenti or [])
         next_id = max_review_comment_id(comms) + 1
-        nuovo_commento = {"id":next_id,"utente":session["username"],"ruolo":session.get("role","user"),
-                          "testo":testo,"parent_id":parent_id,
-                          "data":datetime.now().strftime("%Y-%m-%d %H:%M:%S"),"likes":0,"dislikes":0,"user_likes":[],"user_dislikes":[],
-                          "replies":[]}
+        nuovo_commento = {"id": next_id, "utente": session["username"], "ruolo": session.get("role", "user"),
+                          "testo": testo, "parent_id": parent_id,
+                          "data": datetime.now().strftime("%Y-%m-%d %H:%M:%S"), "likes": 0, "dislikes": 0, "user_likes": [], "user_dislikes": [],
+                          "replies": []}
         inserted = False
         if parent_id is not None:
             parent = find_flat_comment(comms, parent_id)
@@ -1682,14 +1860,11 @@ def api_recensioni_commenti(rec_id):
             if parent_obj:
                 autor = parent_obj.get("utente")
                 if autor and autor != session["username"]:
-                    crea_notifica(autor, "comment_reply", "Risposta al tuo commento",
-                                  f"Hanno risposto a un tuo commento sulla recensione #{rec_id}.",
-                                  "/user#recensioni")
+                    crea_notifica(autor, "comment_reply", "Risposta al tuo commento", f"Hanno risposto a un tuo commento sulla recensione #{rec_id}.", "/user#recensioni")
         else:
             if rec.username and rec.username != session["username"] and not rec.is_anonymous:
-                crea_notifica(rec.username, "comment_reply", "Nuovo commento alla tua recensione",
-                              f"{session['username']} ha commentato una tua recensione.", "/user#recensioni")
-        return jsonify({"success":True,"comment":nuovo_commento})
+                crea_notifica(rec.username, "comment_reply", "Nuovo commento alla tua recensione", f"{session['username']} ha commentato una tua recensione.", "/user#recensioni")
+        return jsonify({"success": True, "comment": nuovo_commento})
 
 def _comment_vote_mutate(branch, cid, voter, azione):
     cid = int(cid)
@@ -1698,69 +1873,84 @@ def _comment_vote_mutate(branch, cid, voter, azione):
         subs = list(c.get("replies") or [])
         if int(c.get("id") or -1) == cid:
             ul, udl = list(c.get("user_likes", [])), list(c.get("user_dislikes", []))
-            if voter in ul: ul.remove(voter); c["likes"] = max(0, c.get("likes", 0) - 1)
-            if voter in udl: udl.remove(voter); c["dislikes"] = max(0, c.get("dislikes", 0) - 1)
+            if voter in ul:
+                ul.remove(voter)
+                c["likes"] = max(0, c.get("likes", 0) - 1)
+            if voter in udl:
+                udl.remove(voter)
+                c["dislikes"] = max(0, c.get("dislikes", 0) - 1)
             if azione == "like" and voter not in ul:
-                ul.append(voter); c["likes"] = c.get("likes", 0) + 1
+                ul.append(voter)
+                c["likes"] = c.get("likes", 0) + 1
             elif azione == "dislike" and voter not in udl:
-                udl.append(voter); c["dislikes"] = c.get("dislikes", 0) + 1
+                udl.append(voter)
+                c["dislikes"] = c.get("dislikes", 0) + 1
             c["user_likes"], c["user_dislikes"] = ul, udl
             branch[j] = c
             return True, c.get("likes", 0), c.get("dislikes", 0)
         ok, lk, dk = _comment_vote_mutate(subs, cid, voter, azione)
         if ok:
-            c["replies"] = subs; branch[j] = c
+            c["replies"] = subs
+            branch[j] = c
             return True, lk, dk
     return False, 0, 0
 
 @app.route("/api/recensioni/<int:rec_id>/commenti/<int:comm_id>/like", methods=["POST"])
 @limiter.limit("1200/day;240/hour", methods=["POST"])
 def api_recensioni_commenti_like(rec_id, comm_id):
-    if not login_required(): return jsonify({"error":"Non autorizzato"}), 403
+    if not login_required(): return jsonify({"error": "Non autorizzato"}), 403
     rec = Review.query.get(rec_id)
-    if not rec: return jsonify({"error":"Non trovata"}), 404
+    if not rec: return jsonify({"error": "Non trovata"}), 404
     if not spam_allow(session.get("username"), "cmt_vote", 400, 86400):
-        return jsonify({"error":"Limite giornaliero voti su commenti."}), 429
+        return jsonify({"error": "Limite giornaliero voti su commenti."}), 429
     comms = list(rec.commenti or [])
-    data = request.get_json() or {}; azione = data.get("azione")
+    data = request.get_json() or {}
+    azione = data.get("azione")
     voter = session["username"]
     ok, lk, dk = _comment_vote_mutate(comms, comm_id, voter, azione)
     if not ok:
-        return jsonify({"error":"Commento non trovato"}), 404
+        return jsonify({"error": "Commento non trovato"}), 404
     rec.commenti = comms
     db.session.commit()
-    return jsonify({"success":True,"likes":lk,"dislikes":dk})
+    return jsonify({"success": True, "likes": lk, "dislikes": dk})
 
 # =====================================================
 # ============= API - PROFESSORI ======================
 # =====================================================
-
 @app.route("/api/professori", methods=["GET", "POST"])
 def api_professori():
-    if not login_required(): return jsonify({"error":"Non autorizzato"}), 403
+    if not login_required(): return jsonify({"error": "Non autorizzato"}), 403
     if request.method == "POST":
         raw = request.get_json(force=True, silent=True) or {}
         nome = (raw.get("nome") or "").strip()
-        if not nome: return jsonify({"error":"Nome obbligatorio"}), 400
+        if not nome: return jsonify({"error": "Nome obbligatorio"}), 400
+        materie_extra = raw.get("materie_extra") or raw.get("materie") or []
+        if isinstance(materie_extra, str):
+            materie_extra = [x.strip() for x in materie_extra.split(",") if x.strip()]
         nuovo = Professor(nome=nome, materia=(raw.get("materia") or "").strip() or None,
-                           scuola=(raw.get("scuola") or "").strip() or None,
-                           descrizione=(raw.get("descrizione") or "").strip() or None)
+                          scuola=(raw.get("scuola") or "").strip() or None,
+                          istituto=(raw.get("istituto") or raw.get("scuola") or "").strip() or None,
+                          descrizione=(raw.get("descrizione") or "").strip() or None,
+                          profilo_pubblico=bool(raw.get("profilo_pubblico")),
+                          materie_extra=materie_extra[:20] if isinstance(materie_extra, list) else [])
         tax_upsert_subject(nuovo.materia, session.get("username"))
         tax_upsert_school(nuovo.scuola, session.get("username"))
-        db.session.add(nuovo); db.session.commit()
+        db.session.add(nuovo)
+        db.session.commit()
         log_audit("professore_creato")
-        return jsonify({"success":True})
+        return jsonify({"success": True})
     return jsonify([p.to_dict() for p in Professor.query.all()])
 
 @app.route("/api/professori/<int:prof_id>", methods=["PUT", "DELETE"])
 def api_professori_mod(prof_id):
-    if not login_required(): return jsonify({"error":"Non autorizzato"}), 403
+    if not login_required(): return jsonify({"error": "Non autorizzato"}), 403
     prof = Professor.query.get(prof_id)
-    if not prof: return jsonify({"error":"Non trovato"}), 404
+    if not prof: return jsonify({"error": "Non trovato"}), 404
     if request.method == "DELETE":
-        db.session.delete(prof); db.session.commit()
+        db.session.delete(prof)
+        db.session.commit()
         log_audit("professore_eliminato")
-        return jsonify({"success":True})
+        return jsonify({"success": True})
     if request.method == "PUT":
         raw = request.get_json(force=True, silent=True) or {}
         if "nome" in raw and (raw.get("nome") or "").strip():
@@ -1769,91 +1959,209 @@ def api_professori_mod(prof_id):
             prof.materia = (raw.get("materia") or "").strip() or None
         if "scuola" in raw:
             prof.scuola = (raw.get("scuola") or "").strip() or None
+        if "istituto" in raw:
+            prof.istituto = (raw.get("istituto") or "").strip() or None
         if "descrizione" in raw:
             prof.descrizione = (raw.get("descrizione") or "").strip() or None
-        if not prof.nome: return jsonify({"error":"Nome obbligatorio"}), 400
+        if "profilo_pubblico" in raw:
+            prof.profilo_pubblico = bool(raw.get("profilo_pubblico"))
+        if "materie_extra" in raw or "materie" in raw:
+            materie_extra = raw.get("materie_extra") if "materie_extra" in raw else raw.get("materie")
+            if isinstance(materie_extra, str):
+                materie_extra = [x.strip() for x in materie_extra.split(",") if x.strip()]
+            if isinstance(materie_extra, list):
+                prof.materie_extra = [str(x).strip()[:100] for x in materie_extra if str(x).strip()][:20]
+        if not prof.nome: return jsonify({"error": "Nome obbligatorio"}), 400
         tax_upsert_subject(prof.materia, session.get("username"))
         tax_upsert_school(prof.scuola, session.get("username"))
         db.session.commit()
         log_audit("professore_aggiornato")
-        return jsonify({"success":True})
+        return jsonify({"success": True})
+
+@app.route("/professori/<int:prof_id>")
+def profilo_professore_pubblico(prof_id):
+    prof = Professor.query.get_or_404(prof_id)
+    if not prof.profilo_pubblico and not admin_required():
+        abort(404)
+    voti = Vote.query.filter(Vote.nomeProf.ilike(prof.nome)).all()
+    recensioni = Review.query.filter(or_(Review.professor_id == prof.id, Review.nomeProfRec.ilike(prof.nome))).all()
+    numeri = []
+    for v in voti:
+        try:
+            numeri.append(float(str(v.voto).replace(",", ".")))
+        except (TypeError, ValueError):
+            pass
+    media = round(sum(numeri) / len(numeri), 1) if numeri else None
+    return render_template("professore.html", prof=prof.to_dict(), media=media,
+                           recensioni=[recensioni_mask_row(r) for r in recensioni[-20:]],
+                           voti_count=len(voti), recensioni_count=len(recensioni))
+
+@app.route("/api/professori/pubblici", methods=["GET"])
+def api_professori_pubblici():
+    q = Professor.query.filter_by(profilo_pubblico=True)
+    scuola = request.args.get("scuola", "").strip()
+    materia = request.args.get("materia", "").strip()
+    if scuola: q = q.filter(Professor.scuola.ilike(f"%{scuola}%"))
+    if materia: q = q.filter(Professor.materia.ilike(f"%{materia}%"))
+    return jsonify([p.to_dict() for p in q.order_by(Professor.nome.asc()).limit(500).all()])
+
+@app.route("/api/professori/<int:prof_id>/avatar", methods=["POST"])
+def api_professore_avatar_upload(prof_id):
+    if not login_required(): return jsonify({"error": "Non autorizzato"}), 403
+    prof = Professor.query.get(prof_id)
+    if not prof: return jsonify({"error": "Non trovato"}), 404
+    f = request.files.get("file")
+    if not f or not f.filename: return jsonify({"error": "File mancante"}), 400
+    ext = f.filename.rsplit(".", 1)[-1].lower() if "." in f.filename else ""
+    if ext not in ("png", "jpg", "jpeg", "gif", "webp"):
+        return jsonify({"error": "Formato non consentito"}), 400
+    safe = secure_filename(f"prof_{prof.id}_{uuid.uuid4().hex}.{ext}")
+    path = os.path.join(AVATAR_FOLDER, safe)
+    f.save(path)
+    if os.path.getsize(path) > 2 * 1024 * 1024:
+        os.remove(path)
+        return jsonify({"error": "File troppo grande (max 2MB)"}), 400
+    old = (prof.avatar_file or "").strip()
+    if old:
+        try:
+            old_path = os.path.join(AVATAR_FOLDER, secure_filename(old))
+            if os.path.isfile(old_path): os.remove(old_path)
+        except OSError:
+            pass
+    prof.avatar_file = safe
+    db.session.commit()
+    return jsonify({"success": True, "avatar_url": url_for("uploads_avatars_public", fname=safe)})
+
+@app.route("/api/professori/<int:prof_id>/segnala", methods=["POST"])
+def api_professore_segnala(prof_id):
+    if not login_required(): return jsonify({"error": "Non autorizzato"}), 403
+    if not Professor.query.get(prof_id): return jsonify({"error": "Non trovato"}), 404
+    data = request.get_json(force=True, silent=True) or {}
+    motivo = (data.get("motivo") or "Dati professore errati").strip()
+    nuova = Report(tipo="professor_data", indice=prof_id, motivo=motivo, segnalatore=session["username"], stato="pending")
+    db.session.add(nuova)
+    db.session.commit()
+    for admin in User.query.filter_by(role="admin").all():
+        crea_notifica(admin.username, "segnalazione", "Segnalazione dati professore", motivo[:180], "/admin#segnalazioni")
+    return jsonify({"success": True, "id": nuova.id})
+
+@app.route("/api/professori/<int:prof_id>/richiesta-modifica", methods=["POST"])
+def api_professore_richiesta_modifica(prof_id):
+    if not login_required(): return jsonify({"error": "Non autorizzato"}), 403
+    prof = Professor.query.get(prof_id)
+    if not prof: return jsonify({"error": "Non trovato"}), 404
+    data = request.get_json(force=True, silent=True) or {}
+    payload = {"professore": prof.to_dict(), "richiesta": data}
+    nuova = Report(tipo="professor_update_request", indice=prof_id,
+                   motivo=json.dumps(payload, ensure_ascii=False)[:4000],
+                   segnalatore=session["username"], stato="pending")
+    db.session.add(nuova)
+    db.session.commit()
+    return jsonify({"success": True, "id": nuova.id})
+
+@app.route("/api/professori/merge", methods=["POST"])
+def api_professori_merge():
+    if not admin_required(): return jsonify({"error": "Solo admin"}), 403
+    data = request.get_json(force=True, silent=True) or {}
+    master_id = data.get("master_id")
+    duplicate_ids = data.get("duplicate_ids") or []
+    try:
+        master_id = int(master_id)
+        duplicate_ids = [int(x) for x in duplicate_ids if int(x) != master_id]
+    except (TypeError, ValueError):
+        return jsonify({"error": "ID non validi"}), 400
+    master = Professor.query.get(master_id)
+    if not master: return jsonify({"error": "Professore principale non trovato"}), 404
+    merged = 0
+    for dup in Professor.query.filter(Professor.id.in_(duplicate_ids)).all():
+        Review.query.filter_by(professor_id=dup.id).update({"professor_id": master.id})
+        ProfessorFavorite.query.filter_by(professor_id=dup.id).update({"professor_id": master.id, "chiave_prof": f"id:{master.id}"})
+        StudyMaterial.query.filter_by(professor_id=dup.id).update({"professor_id": master.id})
+        db.session.delete(dup)
+        merged += 1
+    db.session.commit()
+    log_audit("professori_merge", dettagli={"master_id": master_id, "merged": merged})
+    return jsonify({"success": True, "merged": merged})
 
 # =====================================================
 # ============= API - SEGNALAZIONI ====================
 # =====================================================
-
 @app.route("/api/segnalazioni", methods=["GET", "POST"])
 def api_segnalazioni():
     if request.method == "GET":
-        if not admin_required(): return jsonify({"error":"Solo admin"}), 403
+        if not admin_required(): return jsonify({"error": "Solo admin"}), 403
         return jsonify([r.to_dict() for r in Report.query.order_by(Report.data.desc()).all()])
     elif request.method == "POST":
-        if not login_required(): return jsonify({"error":"Non autorizzato"}), 403
+        if not login_required(): return jsonify({"error": "Non autorizzato"}), 403
         data = request.get_json()
         segnalatore = session["username"]
         if admin_required() and (data.get("segnalatore") or "").strip():
             segnalatore = (data.get("segnalatore") or "").strip()
-        nuova = Report(tipo=data.get("tipo","recensione"), indice=data.get("indice"), motivo=data.get("motivo",""),
+        nuova = Report(tipo=data.get("tipo", "recensione"), indice=data.get("indice"), motivo=data.get("motivo", ""),
                        segnalatore=segnalatore, stato="pending")
-        db.session.add(nuova); db.session.commit()
+        db.session.add(nuova)
+        db.session.commit()
         for admin in User.query.filter_by(role="admin").all():
             crea_notifica(admin.username, "segnalazione", "🚩 Nuova Segnalazione", f"{segnalatore} ha segnalato un contenuto", "/admin#segnalazioni")
-        return jsonify({"success":True})
+        return jsonify({"success": True})
 
 @app.route("/api/segnalazioni/<int:id>", methods=["PUT", "DELETE"])
 def api_segnalazioni_gestisci(id):
-    if not admin_required(): return jsonify({"error":"Solo admin"}), 403
+    if not admin_required(): return jsonify({"error": "Solo admin"}), 403
     rep = Report.query.get(id)
-    if not rep: return jsonify({"error":"Non trovata"}), 404
-    if request.method == "DELETE": db.session.delete(rep); db.session.commit(); return jsonify({"success":True})
+    if not rep: return jsonify({"error": "Non trovata"}), 404
+    if request.method == "DELETE":
+        db.session.delete(rep)
+        db.session.commit()
+        return jsonify({"success": True})
     if request.method == "PUT":
         data = request.get_json()
-        if data.get("stato") in ["pending","resolved","dismissed"]:
-            rep.stato, rep.admin_note = data["stato"], data.get("admin_note","")
+        if data.get("stato") in ["pending", "resolved", "dismissed"]:
+            rep.stato, rep.admin_note = data["stato"], data.get("admin_note", "")
             if rep.stato != "pending": rep.data_chiusura = datetime.now()
-            db.session.commit(); return jsonify({"success":True})
-        return jsonify({"error":"Stato non valido"}), 400
+            db.session.commit()
+            return jsonify({"success": True})
+        return jsonify({"error": "Stato non valido"}), 400
 
 # =====================================================
 # ============= API - SESSIONI ========================
 # =====================================================
-
 @app.route("/api/sessioni", methods=["GET"])
 def api_sessioni_lista():
-    if not admin_required(): return jsonify({"error":"Solo admin"}), 403
+    if not admin_required(): return jsonify({"error": "Solo admin"}), 403
     return jsonify([s.to_dict() for s in SessionLog.query.all()])
 
 @app.route("/api/sessioni/<session_id>", methods=["DELETE"])
 def api_sessioni_termina(session_id):
-    if not admin_required(): return jsonify({"error":"Solo admin"}), 403
+    if not admin_required(): return jsonify({"error": "Solo admin"}), 403
     s = SessionLog.query.filter_by(session_id=session_id).first()
-    if not s: return jsonify({"error":"Non trovata"}), 404
-    if s.username == session["username"]: return jsonify({"error":"Non puoi disconnettere te stesso"}), 403
-    db.session.delete(s); db.session.commit()
-    return jsonify({"success":True,"message":f"Sessione di {s.username} terminata"})
+    if not s: return jsonify({"error": "Non trovata"}), 404
+    if s.username == session["username"]: return jsonify({"error": "Non puoi disconnettere te stesso"}), 403
+    db.session.delete(s)
+    db.session.commit()
+    return jsonify({"success": True, "message": f"Sessione di {s.username} terminata"})
 
 # =====================================================
 # ============= API - ANALYTICS & PRIVACY =============
 # =====================================================
-
 @app.route("/api/analytics/overview", methods=["GET"])
 def api_analytics_overview():
-    if not admin_required(): return jsonify({"error":"Solo admin"}), 403
+    if not admin_required(): return jsonify({"error": "Solo admin"}), 403
     return jsonify({
-        "utenti_totali":User.query.count(),"utenti_admin":User.query.filter_by(role="admin").count(),
-        "utenti_sospesi":User.query.filter_by(account_status="sospeso").count(),
-        "voti_totali":Vote.query.count(),"recensioni_totali":Review.query.count(),
-        "ticket_totali":Ticket.query.count(),
-        "ticket_aperti":Ticket.query.filter(Ticket.stato.in_(["aperto","in_lavorazione"])).count(),
-        "segnalazioni_pending":Report.query.filter_by(stato="pending").count(),
-        "sessioni_attive":SessionLog.query.count(),
-        "registrazioni_in_attesa":RegistrationRequest.query.filter_by(stato="in_attesa").count(),
-        "timestamp":datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        "utenti_totali": User.query.count(), "utenti_admin": User.query.filter_by(role="admin").count(),
+        "utenti_sospesi": User.query.filter_by(account_status="sospeso").count(),
+        "voti_totali": Vote.query.count(), "recensioni_totali": Review.query.count(),
+        "ticket_totali": Ticket.query.count(),
+        "ticket_aperti": Ticket.query.filter(Ticket.stato.in_(["aperto", "in_lavorazione"])).count(),
+        "segnalazioni_pending": Report.query.filter_by(stato="pending").count(),
+        "sessioni_attive": SessionLog.query.count(),
+        "registrazioni_in_attesa": RegistrationRequest.query.filter_by(stato="in_attesa").count(),
+        "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     })
 
 @app.route("/api/analytics/charts", methods=["GET"])
 def api_analytics_charts():
-    if not admin_required(): return jsonify({"error":"Solo admin"}), 403
+    if not admin_required(): return jsonify({"error": "Solo admin"}), 403
     voti = Vote.query.order_by(Vote.timestamp.asc()).all()
     per_mese = Counter()
     for v in voti:
@@ -1862,7 +2170,6 @@ def api_analytics_charts():
         per_mese[per_mesi_key] += 1
     mesi_recenti = sorted(per_mese.keys())[-8:]
     dati_linea = {"labels": mesi_recenti, "values": [per_mese[m] for m in mesi_recenti]}
-
     per_scuola = Counter((v.scuola or "").strip() or "(non indicata)" for v in voti)
     per_scuola.pop("", None)
     top_scuole = sorted(per_scuola.items(), key=lambda x: -x[1])[:8]
@@ -1874,11 +2181,11 @@ def api_analytics_charts():
             if v.materia: medi_materia[v.materia.strip()].append(vv)
         except (ValueError, TypeError):
             pass
-    bar_materie = sorted(((m, round(sum(vals)/len(vals), 2)) for m, vals in medi_materia.items() if vals), key=lambda x: -x[1])[:8]
+    bar_materie = sorted(((m, round(sum(vals) / len(vals), 2)) for m, vals in medi_materia.items() if vals), key=lambda x: -x[1])[:8]
 
     studenti = User.query.filter_by(role="user").count()
     admin_num = User.query.filter_by(role="admin").count()
-    donut_ruoli = {"labels":["Studenti","Amministratori"], "values":[studenti, admin_num]}
+    donut_ruoli = {"labels": ["Studenti", "Amministratori"], "values": [studenti, admin_num]}
 
     medi_prof = defaultdict(list)
     for v in voti:
@@ -1889,7 +2196,7 @@ def api_analytics_charts():
             pass
     top_prof_tuple = ("—", None, None, None)
     if medi_prof:
-        best = max(medi_prof.items(), key=lambda it: (sum(it[1])/len(it[1]), len(it[1])))
+        best = max(medi_prof.items(), key=lambda it: (sum(it[1]) / len(it[1]), len(it[1])))
         nome_tp = best[0]
         media_tp = round(sum(best[1]) / len(best[1]), 2)
         n_voti = len(best[1])
@@ -1898,15 +2205,15 @@ def api_analytics_charts():
 
     return jsonify({
         "linea_voti": dati_linea,
-        "doughnut_scuole": {"labels":[x[0] for x in top_scuole], "values":[x[1] for x in top_scuole]},
-        "bar_materie": {"labels":[x[0] for x in bar_materie], "values":[x[1] for x in bar_materie]},
+        "doughnut_scuole": {"labels": [x[0] for x in top_scuole], "values": [x[1] for x in top_scuole]},
+        "bar_materie": {"labels": [x[0] for x in bar_materie], "values": [x[1] for x in bar_materie]},
         "pie_ruoli": donut_ruoli,
         "top_prof": {"nome": top_prof_tuple[0], "media": top_prof_tuple[1], "n_voti": top_prof_tuple[2], "n_recensioni": top_prof_tuple[3]},
     })
 
 @app.route("/api/admin/avvisi", methods=["GET", "POST"])
 def api_admin_avvisi():
-    if not admin_required(): return jsonify({"error":"Solo admin"}), 403
+    if not admin_required(): return jsonify({"error": "Solo admin"}), 403
     if request.method == "GET":
         return jsonify([n.to_dict() for n in Notice.query.order_by(Notice.created_at.desc()).all()])
     data = request.get_json(force=True, silent=True) or {}
@@ -1915,20 +2222,25 @@ def api_admin_avvisi():
                    expires_at=None)
     if data.get("expires_at"):
         try:
-            nuovo.expires_at = datetime.fromisoformat(str(data["expires_at"]).replace("Z",""))
+            nuovo.expires_at = datetime.fromisoformat(str(data["expires_at"]).replace("Z", " "))
         except (ValueError, TypeError):
             pass
-    if not nuovo.titolo or not nuovo.contenuto: return jsonify({"error":"Titolo e contenuto obbligatori"}), 400
-    db.session.add(nuovo); db.session.commit(); log_audit("avviso_creato")
-    return jsonify({"success":True,"avviso":nuovo.to_dict()})
+    if not nuovo.titolo or not nuovo.contenuto: return jsonify({"error": "Titolo e contenuto obbligatori"}), 400
+    db.session.add(nuovo)
+    db.session.commit()
+    log_audit("avviso_creato")
+    return jsonify({"success": True, "avviso": nuovo.to_dict()})
 
 @app.route("/api/admin/avvisi/<int:nid>", methods=["PUT", "DELETE"])
 def api_admin_avvisi_gestione(nid):
-    if not admin_required(): return jsonify({"error":"Solo admin"}), 403
+    if not admin_required(): return jsonify({"error": "Solo admin"}), 403
     n = Notice.query.get(nid)
-    if not n: return jsonify({"error":"Non trovato"}), 404
+    if not n: return jsonify({"error": "Non trovato"}), 404
     if request.method == "DELETE":
-        db.session.delete(n); db.session.commit(); log_audit("avviso_eliminato"); return jsonify({"success":True})
+        db.session.delete(n)
+        db.session.commit()
+        log_audit("avviso_eliminato")
+        return jsonify({"success": True})
     data = request.get_json(force=True, silent=True) or {}
     if "titolo" in data: n.titolo = (data["titolo"] or "").strip()[:200]
     if "contenuto" in data: n.contenuto = (data["contenuto"] or "").strip()
@@ -1940,15 +2252,16 @@ def api_admin_avvisi_gestione(nid):
             n.expires_at = None
         else:
             try:
-                n.expires_at = datetime.fromisoformat(str(raw).replace("Z",""))
+                n.expires_at = datetime.fromisoformat(str(raw).replace("Z", " "))
             except (ValueError, TypeError):
                 pass
-    db.session.commit(); log_audit("avviso_aggiornato")
-    return jsonify({"success":True,"avviso":n.to_dict()})
+    db.session.commit()
+    log_audit("avviso_aggiornato")
+    return jsonify({"success": True, "avviso": n.to_dict()})
 
 @app.route("/api/admin/notifiche-broadcast", methods=["POST"])
 def api_admin_broadcast():
-    if not admin_required(): return jsonify({"error":"Solo admin"}), 403
+    if not admin_required(): return jsonify({"error": "Solo admin"}), 403
     data = request.get_json(force=True, silent=True) or {}
     titolo = (data.get("titolo") or "").strip()
     messaggio = (data.get("messaggio") or "").strip()
@@ -1957,7 +2270,7 @@ def api_admin_broadcast():
         filtro = "users"
     tipo_notif = (data.get("tipo") or "sistema").strip()
     link = data.get("link") or ""
-    if not titolo or not messaggio: return jsonify({"error":"Titolo e messaggio richiesti"}), 400
+    if not titolo or not messaggio: return jsonify({"error": "Titolo e messaggio richiesti"}), 400
     q = User.query
     if filtro == "users":
         q = q.filter_by(role="user")
@@ -1968,14 +2281,115 @@ def api_admin_broadcast():
     for u in dest:
         if crea_notifica(u.username, tipo_notif, titolo, messaggio, link or None): mandati += 1
     log_audit("broadcast_notifica", dettagli={"destinatari": len(dest)})
-    return jsonify({"success":True,"inviate":mandati})
+    return jsonify({"success": True, "inviate": mandati})
 
 @app.route("/api/admin/audit-log", methods=["GET"])
 def api_audit_log():
-    if not admin_required(): return jsonify({"error":"Solo admin"}), 403
+    if not admin_required(): return jsonify({"error": "Solo admin"}), 403
     limite = min(int(request.args.get("limit", "200")), 500)
     rows = AuditLog.query.order_by(AuditLog.timestamp.desc()).limit(limite).all()
     return jsonify([r.to_dict() for r in rows])
+
+def _backup_payload():
+    return {
+        "version": 1,
+        "created_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        "users": [u.to_dict(include_sensitive=True) for u in User.query.all()],
+        "professors": [p.to_dict() for p in Professor.query.all()],
+        "votes": [v.to_dict() for v in Vote.query.all()],
+        "reviews": [r.to_dict() for r in Review.query.all()],
+        "tickets": [t.to_dict() for t in Ticket.query.all()],
+        "reports": [r.to_dict() for r in Report.query.all()],
+        "notices": [n.to_dict() for n in Notice.query.all()],
+        "schools": [s.to_dict() for s in School.query.all()],
+        "subjects": [s.to_dict() for s in Subject.query.all()],
+        "privacy_requests": [p.to_dict() for p in PrivacyRequest.query.all()],
+        "audit_logs": [a.to_dict() for a in AuditLog.query.order_by(AuditLog.timestamp.desc()).limit(5000).all()],
+    }
+
+@app.route("/api/admin/backup", methods=["GET"])
+def api_admin_backup():
+    if not admin_required(): return jsonify({"error": "Solo admin"}), 403
+    fmt = request.args.get("format", "json").lower()
+    payload = _backup_payload()
+    stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    if fmt == "zip":
+        mem = io.BytesIO()
+        with zipfile.ZipFile(mem, "w", zipfile.ZIP_DEFLATED) as zf:
+            zf.writestr("registroprof_backup.json", json.dumps(payload, ensure_ascii=False, indent=2))
+        mem.seek(0)
+        return send_file(mem, mimetype="application/zip", as_attachment=True, download_name=f"registroprof_backup_{stamp}.zip")
+    return Response(json.dumps(payload, ensure_ascii=False, indent=2),
+                    mimetype="application/json; charset=utf-8",
+                    headers={"Content-Disposition": f'attachment; filename="registroprof_backup_{stamp}.json"'})
+
+@app.route("/api/admin/restore", methods=["POST"])
+def api_admin_restore():
+    if not admin_required(): return jsonify({"error": "Solo admin"}), 403
+    if not is_founder_user(session.get("username")):
+        return jsonify({"error": "Solo il founder puo ripristinare backup."}), 403
+    if (request.form.get("confirm") or request.headers.get("X-Restore-Confirm") or "") != "RESTORE-BACKUP":
+        return jsonify({"error": "Conferma richiesta: RESTORE-BACKUP"}), 400
+    f = request.files.get("file")
+    if not f or not f.filename:
+        return jsonify({"error": "File backup mancante"}), 400
+    raw = f.read()
+    try:
+        if f.filename.lower().endswith(".zip"):
+            with zipfile.ZipFile(io.BytesIO(raw)) as zf:
+                raw = zf.read("registroprof_backup.json")
+        payload = json.loads(raw.decode("utf-8"))
+    except Exception:
+        return jsonify({"error": "Backup non leggibile"}), 400
+    if int(payload.get("version") or 0) != 1:
+        return jsonify({"error": "Versione backup non supportata"}), 400
+    
+    imported = {"schools": 0, "subjects": 0, "professors": 0}
+    for s in payload.get("schools") or []:
+        if s.get("nome") and not School.query.filter(School.nome.ilike(s["nome"])).first():
+            db.session.add(School(nome=s["nome"][:180], created_by=session["username"]))
+            imported["schools"] += 1
+    for s in payload.get("subjects") or []:
+        if s.get("nome") and not Subject.query.filter(Subject.nome.ilike(s["nome"])).first():
+            db.session.add(Subject(nome=s["nome"][:120], created_by=session["username"]))
+            imported["subjects"] += 1
+    for p in payload.get("professors") or []:
+        nome = (p.get("nome") or "").strip()
+        if not nome: continue
+        exists = Professor.query.filter(Professor.nome.ilike(nome), Professor.scuola.ilike((p.get("scuola") or ""))).first()
+        if exists: continue
+        db.session.add(Professor(nome=nome[:100], materia=(p.get("materia") or "")[:100] or None,
+                                 scuola=(p.get("scuola") or "")[:150] or None,
+                                 istituto=(p.get("istituto") or p.get("scuola") or "")[:180] or None,
+                                 descrizione=(p.get("descrizione") or "")[:4000] or None,
+                                 profilo_pubblico=bool(p.get("profilo_pubblico")),
+                                 materie_extra=(p.get("materie") or [])[:20]))
+        imported["professors"] += 1
+    db.session.commit()
+    log_audit("backup_restore_import", dettagli=imported)
+    return jsonify({"success": True, "imported": imported})
+
+@app.route("/api/assistente-ai", methods=["POST"])
+def api_assistente_ai():
+    if not login_required(): return jsonify({"error": "Non autorizzato"}), 403
+    data = request.get_json(force=True, silent=True) or {}
+    domanda = (data.get("domanda") or data.get("message") or "").strip()
+    q = domanda.lower()
+    if not domanda:
+        return jsonify({"answer": "Scrivi una domanda su account, recensioni, professori, ticket, privacy o notifiche."})
+    knowledge = [
+        (("password", "recupero", "codice"), "Per recuperare la password apri la pagina di login, scegli Password dimenticata e usa il codice temporaneo: scade dopo 15 minuti."),
+        (("recensione", "anonima", "voto"), "Puoi inserire voti da 1 a 10 e recensioni testuali. Se attivi l'anonimato, gli altri utenti vedono la recensione senza il tuo nome."),
+        (("ticket", "supporto", "admin"), "Per assistenza apri un ticket dalla dashboard utente: puoi indicare priorita, messaggio e seguire le risposte nello storico ticket."),
+        (("privacy", "gdpr", "dati", "elimin"), "Dal profilo puoi esportare i tuoi dati GDPR o richiedere/cancellare l'account. Le recensioni vengono anonimizzate dopo l'eliminazione."),
+        (("notific", "email", "preferenze"), "Le preferenze notifiche permettono di scegliere categorie e canali. Le notifiche interne restano consultabili dalla campanella."),
+        (("professor", "professore", "scheda"), "I professori possono avere una scheda pubblica solo se abilitata, con materie, scuola, foto opzionale, recensioni e media voti."),
+        (("scuola", "istituto", "materia", "gruppo"), "L'app supporta piu scuole: scuole, materie, gruppi, materiali ed eventi possono essere collegati all'istituto dell'utente."),
+    ]
+    for keys, answer in knowledge:
+        if any(k in q for k in keys):
+            return jsonify({"answer": answer, "source": "RegistroProf help"})
+    return jsonify({"answer": "Posso aiutarti con account, professori, recensioni, notifiche, ticket, materiali, calendario, privacy GDPR e funzioni admin. Per un caso specifico indica la sezione e cosa vuoi fare.", "source": "RegistroProf help"})
 
 def costruisci_pacchetto_privacy_utente(username):
     u_obj = User.query.filter_by(username=username).first()
@@ -2006,76 +2420,81 @@ def costruisci_pacchetto_privacy_utente(username):
 
 @app.route("/api/privacy/export", methods=["GET"])
 def api_privacy_export():
-    if not login_required(): return jsonify({"error":"Non autorizzato"}), 403
+    if not login_required(): return jsonify({"error": "Non autorizzato"}), 403
     return jsonify(costruisci_pacchetto_privacy_utente(session["username"]))
 
 @app.route("/api/privacy/export.csv", methods=["GET"])
 def api_privacy_export_csv():
-    if not login_required(): return jsonify({"error":"Non autorizzato"}), 403
+    if not login_required(): return jsonify({"error": "Non autorizzato"}), 403
     pac = costruisci_pacchetto_privacy_utente(session["username"])
-    buf = io.StringIO(); w = csv.writer(buf)
+    buf = io.StringIO()
+    w = csv.writer(buf)
     w.writerow(["section", "chiave", "valore"])
     for k, v in (pac.get("utente") or {}).items():
         w.writerow(["utente", str(k), json.dumps(v, ensure_ascii=False) if not isinstance(v, str) else v])
-    for sec, lst in ("voti", pac.get("voti")), ("recensioni", pac.get("recensioni")), ("ticket", pac.get("ticket")), ("notifiche", pac.get("notifiche")), ("access_history", pac.get("access_history")):
+    for sec, lst in [("voti", pac.get("voti")), ("recensioni", pac.get("recensioni")), ("ticket", pac.get("ticket")), ("notifiche", pac.get("notifiche")), ("access_history", pac.get("access_history"))]:
         for i, vo in enumerate(lst or []):
             w.writerow([sec, str(i), json.dumps(vo, ensure_ascii=False)])
     fn = f"privacy_export_{session['username']}_{datetime.now().strftime('%Y%m%d_%H%M')}.csv"
     return Response(buf.getvalue(), mimetype="text/csv; charset=utf-8",
-                      headers={"Content-Disposition": f'attachment; filename="{fn}"'})
+                    headers={"Content-Disposition": f'attachment; filename="{fn}"'})
 
 @app.route("/api/privacy/delete-request", methods=["POST"])
 def api_privacy_delete_request():
-    if not login_required(): return jsonify({"error":"Non autorizzato"}), 403
+    if not login_required(): return jsonify({"error": "Non autorizzato"}), 403
     username = session["username"]
     if PrivacyRequest.query.filter_by(username=username, stato="pending").first():
-        return jsonify({"error":"Hai già una richiesta pending"}), 400
+        return jsonify({"error": "Hai già una richiesta pending"}), 400
     data = request.get_json() or {}
-    nuova = PrivacyRequest(username=username, motivo=data.get("motivo",""))
-    db.session.add(nuova); db.session.commit(); log_audit("privacy_delete_requested", target_username=username)
-    return jsonify({"success":True,"richiesta":nuova.to_dict()})
+    nuova = PrivacyRequest(username=username, motivo=data.get("motivo", ""))
+    db.session.add(nuova)
+    db.session.commit()
+    log_audit("privacy_delete_requested", target_username=username)
+    return jsonify({"success": True, "richiesta": nuova.to_dict()})
 
 @app.route("/api/privacy/delete-requests", methods=["GET", "POST"])
 def api_privacy_delete_requests_list():
-    if not admin_required(): return jsonify({"error":"Solo admin"}), 403
+    if not admin_required(): return jsonify({"error": "Solo admin"}), 403
     if request.method == "GET":
         return jsonify([r.to_dict() for r in PrivacyRequest.query.all()])
     data = request.get_json(force=True, silent=True) or {}
     username = (data.get("username") or "").strip()
     if not username or not User.query.filter_by(username=username).first():
-        return jsonify({"error":"Utente non trovato"}), 404
+        return jsonify({"error": "Utente non trovato"}), 404
     if PrivacyRequest.query.filter_by(username=username, stato="pending").first():
-        return jsonify({"error":"Richiesta già pending"}), 400
+        return jsonify({"error": "Richiesta già pending"}), 400
     nuova = PrivacyRequest(username=username, motivo=(data.get("motivo") or "").strip(), stato="pending")
-    db.session.add(nuova); db.session.commit()
-    return jsonify({"success":True,"richiesta":nuova.to_dict()})
+    db.session.add(nuova)
+    db.session.commit()
+    return jsonify({"success": True, "richiesta": nuova.to_dict()})
 
 @app.route("/api/privacy/delete-requests/<int:req_id>", methods=["PUT"])
 def api_privacy_delete_requests_manage(req_id):
-    if not admin_required(): return jsonify({"error":"Solo admin"}), 403
+    if not admin_required(): return jsonify({"error": "Solo admin"}), 403
     req = PrivacyRequest.query.get(req_id)
-    if not req: return jsonify({"error":"Non trovata"}), 404
+    if not req: return jsonify({"error": "Non trovata"}), 404
     data = request.get_json() or {}
-    if data.get("stato") not in ["approved","rejected"]: return jsonify({"error":"Stato non valido"}), 400
+    if data.get("stato") not in ["approved", "rejected"]: return jsonify({"error": "Stato non valido"}), 400
     utente_nom = req.username
-    req.stato, req.admin_note = data["stato"], data.get("admin_note","")
+    req.stato, req.admin_note = data["stato"], data.get("admin_note", "")
     if req.stato != "pending": req.data_chiusura = datetime.now()
     db.session.commit()
     log_audit("privacy_delete_request_reviewed", target_username=utente_nom)
     if data["stato"] == "approved":
         candidato = User.query.filter_by(username=utente_nom).first()
         if candidato and is_founder_user(candidato.username):
-            return jsonify({"error":"Impossibile eliminare account founder"}), 400
+            return jsonify({"error": "Impossibile eliminare account founder"}), 400
         elimina_utente_totale(utente_nom)
-        return jsonify({"success":True,"message":"Utente e dati collegati eliminati."})
-    return jsonify({"success":True,"richiesta":req.to_dict()})
+        return jsonify({"success": True, "message": "Utente e dati collegati eliminati."})
+    return jsonify({"success": True, "richiesta": req.to_dict()})
 
 def _exam_dict(ev):
-    return {"id":ev.id,"scuola":ev.scuola,"group_id":ev.group_id,"materia":ev.materia,"titolo":ev.titolo,"note":ev.note,
-            "creato_da":ev.creato_da,"quando":ev.quando.strftime("%Y-%m-%d %H:%M:%S") if ev.quando else None}
+    return {"id": ev.id, "scuola": ev.scuola, "group_id": ev.group_id, "materia": ev.materia, "titolo": ev.titolo, "note": ev.note,
+            "creato_da": ev.creato_da, "quando": ev.quando.strftime("%Y-%m-%d %H:%M:%S") if ev.quando else None}
 
 def _sam_sc(urow, schools):
-    a = ((urow.scuola or "").strip().lower()); b = ((schools or "").strip().lower())
+    a = ((urow.scuola or "").strip().lower())
+    b = ((schools or "").strip().lower())
     return bool(a and b and a == b)
 
 def _gruppo_mem(uid, gid):
@@ -2083,35 +2502,32 @@ def _gruppo_mem(uid, gid):
 
 @app.route("/api/materiali", methods=["GET"])
 def api_materiali_lista():
-    if not login_required(): return jsonify({"error":"Non autorizzato"}), 403
+    if not login_required(): return jsonify({"error": "Non autorizzato"}), 403
     q = StudyMaterial.query
     sc = request.args.get("scuola", "").strip()
     pn = request.args.get("prof", "").strip()
     pid = request.args.get("professor_id", "").strip()
-    if sc:
-        q = q.filter(StudyMaterial.scuola.ilike(f"%{sc}%"))
-    if pn:
-        q = q.filter(StudyMaterial.professore_nome.ilike(f"%{pn}%"))
-    if pid.isdigit():
-        q = q.filter_by(professor_id=int(pid))
+    if sc: q = q.filter(StudyMaterial.scuola.ilike(f"%{sc}%"))
+    if pn: q = q.filter(StudyMaterial.professore_nome.ilike(f"%{pn}%"))
+    if pid.isdigit(): q = q.filter_by(professor_id=int(pid))
     return jsonify([{**m.to_dict(), "file": True} for m in q.order_by(StudyMaterial.quando.desc()).limit(500).all()])
 
 @app.route("/api/materiali", methods=["POST"])
 @limiter.limit("80/day;20/hour", methods=["POST"])
 def api_materiali_upload():
-    if not login_required(): return jsonify({"error":"Non autorizzato"}), 403
+    if not login_required(): return jsonify({"error": "Non autorizzato"}), 403
     if not spam_allow(session.get("username"), "material_up", 30, 86400):
-        return jsonify({"error":"Limite caricamenti giornaliero."}), 429
+        return jsonify({"error": "Limite caricamenti giornaliero."}), 429
     ume = User.query.filter_by(username=session["username"]).first()
     f = request.files.get("file")
-    if not f or not f.filename: return jsonify({"error":"File mancante"}), 400
+    if not f or not f.filename: return jsonify({"error": "File mancante"}), 400
     fname = secure_filename(f.filename)
-    if not materiale_consentiti(fname): return jsonify({"error":"Estensione non consentita"}), 400
+    if not materiale_consentiti(fname): return jsonify({"error": "Estensione non consentita"}), 400
     titolo = (request.form.get("titolo") or fname).strip()[:200]
     pn = request.form.get("professore_nome", "").strip()[:120]
     mat = request.form.get("materia", "").strip()[:100]
     sc = (request.form.get("scuola") or "").strip()[:150] or (ume.scuola or "").strip()
-    if not sc: return jsonify({"error":"Scuola obbligatoria"}), 400
+    if not sc: return jsonify({"error": "Scuola obbligatoria"}), 400
     try:
         pid = int(request.form.get("professor_id")) if request.form.get("professor_id") else None
     except (TypeError, ValueError):
@@ -2122,40 +2538,43 @@ def api_materiali_upload():
     sz = os.path.getsize(disk)
     if sz > MAX_UPLOAD_BYTES:
         try: os.remove(disk)
-        except OSError:
-            pass
-        return jsonify({"error":"File troppo grande"}), 400
+        except OSError: pass
+        return jsonify({"error": "File troppo grande"}), 400
     row = StudyMaterial(professor_id=pid, professore_nome=pn or None, materia=mat or None, scuola=sc,
                         titolo=titolo or fname, nome_file_sicuro=safe_fn, caricato_da=session["username"],
                         mime=f.mimetype or "", dimensione=int(sz))
-    db.session.add(row); db.session.commit(); notify_favorites_new_material(row); log_audit("materiale_upload")
-    return jsonify({"success":True,"id":row.id})
+    db.session.add(row)
+    db.session.commit()
+    notify_favorites_new_material(row)
+    log_audit("materiale_upload")
+    return jsonify({"success": True, "id": row.id})
 
 @app.route("/api/materiali/<int:mid>", methods=["DELETE"])
 def api_materiali_delete(mid):
-    if not login_required(): return jsonify({"error":"Non autorizzato"}), 403
+    if not login_required(): return jsonify({"error": "Non autorizzato"}), 403
     m = StudyMaterial.query.get(mid)
-    if not m: return jsonify({"error":"Non trovato"}), 404
-    if m.caricato_da != session["username"] and not admin_required(): return jsonify({"error":"Non autorizzato"}), 403
+    if not m: return jsonify({"error": "Non trovato"}), 404
+    if m.caricato_da != session["username"] and not admin_required(): return jsonify({"error": "Non autorizzato"}), 403
     path = os.path.join(UPLOAD_FOLDER, secure_filename(m.nome_file_sicuro))
-    db.session.delete(m); db.session.commit()
+    db.session.delete(m)
+    db.session.commit()
     try:
         if os.path.isfile(path): os.remove(path)
     except OSError:
         pass
-    return jsonify({"success":True})
+    return jsonify({"success": True})
 
 @app.route("/api/materiali/<int:mid>/file", methods=["GET"])
 def api_materiali_download(mid):
-    if not login_required(): return jsonify({"error":"Non autorizzato"}), 403
+    if not login_required(): return jsonify({"error": "Non autorizzato"}), 403
     m = StudyMaterial.query.get(mid)
-    if not m: return jsonify({"error":"Non trovato"}), 404
+    if not m: return jsonify({"error": "Non trovato"}), 404
     uobj = User.query.filter_by(username=session["username"]).first()
     if not admin_required() and not _sam_sc(uobj, m.scuola):
-        return jsonify({"error":"Solo membri della stessa scuola possono scaricare"}), 403
+        return jsonify({"error": "Solo membri della stessa scuola possono scaricare"}), 403
     fn = secure_filename(m.nome_file_sicuro)
     disk = os.path.join(UPLOAD_FOLDER, fn)
-    if not os.path.isfile(disk): return jsonify({"error":"File archiviato non trovato"}), 404
+    if not os.path.isfile(disk): return jsonify({"error": "File archiviato non trovato"}), 404
     dl = secure_filename((m.titolo or "materiale").replace(" ", "_")[:80]) or "download"
     ext = os.path.splitext(fn)[1]
     if ext and not dl.endswith(ext):
@@ -2164,7 +2583,7 @@ def api_materiali_download(mid):
 
 @app.route("/api/eventi-esame", methods=["GET"])
 def api_eventi_lista():
-    if not login_required(): return jsonify({"error":"Non autorizzato"}), 403
+    if not login_required(): return jsonify({"error": "Non autorizzato"}), 403
     uid = User.query.filter_by(username=session["username"]).first()
     scfilt = request.args.get("scuola", "").strip() or ((uid.scuola or "").strip())
     gid = request.args.get("group_id")
@@ -2174,150 +2593,160 @@ def api_eventi_lista():
     except (ValueError, TypeError):
         gi = None
     q = ExamEvent.query
-    if scfilt:
-        q = q.filter(ExamEvent.scuola.ilike(scfilt.strip()))
-    if gi is not None:
-        q = q.filter_by(group_id=gi)
-        if not _gruppo_mem(session["username"], gi):
-            return jsonify({"error":"Non sei membro del gruppo selezionato"}), 403
+    if scfilt: q = q.filter(ExamEvent.scuola.ilike(scfilt.strip()))
+    if gi is not None: q = q.filter_by(group_id=gi)
+    if not _gruppo_mem(session["username"], gi):
+        return jsonify({"error": "Non sei membro del gruppo selezionato"}), 403
     rows = q.order_by(ExamEvent.quando.asc()).limit(500).all()
     return jsonify([_exam_dict(ev) for ev in rows])
 
 @app.route("/api/eventi-esame", methods=["POST"])
 @limiter.limit("120/day;40/hour", methods=["POST"])
 def api_eventi_crea():
-    if not login_required(): return jsonify({"error":"Non autorizzato"}), 403
-    if not spam_allow(session.get("username"), "exam_post", 40, 86400): return jsonify({"error":"Limite giornaliero eventi"}), 429
+    if not login_required(): return jsonify({"error": "Non autorizzato"}), 403
+    if not spam_allow(session.get("username"), "exam_post", 40, 86400): return jsonify({"error": "Limite giornaliero eventi"}), 429
     uid = User.query.filter_by(username=session["username"]).first()
     data = request.get_json(force=True, silent=True) or {}
     sc = ((data.get("scuola") or uid.scuola or "").strip()[:150])
-    if not sc: return jsonify({"error":"Scuola mancante"}), 400
-    if str(data.get("scuola","")).strip() and not _sam_sc(uid, data.get("scuola","")):
-        return jsonify({"error":"Puoi inserire eventi solo per la tua scuola registrata"}), 403
+    if not sc: return jsonify({"error": "Scuola mancante"}), 400
+    if str(data.get("scuola", "")).strip() and not _sam_sc(uid, data.get("scuola", "")):
+        return jsonify({"error": "Puoi inserire eventi solo per la tua scuola registrata"}), 403
     tit = (data.get("titolo") or "").strip()[:200]
-    if not tit: return jsonify({"error":"Titolo obbligatorio"}), 400
+    if not tit: return jsonify({"error": "Titolo obbligatorio"}), 400
     try:
-        dq = datetime.fromisoformat(str(data.get("quando")).replace("Z",""))
+        dq = datetime.fromisoformat(str(data.get("quando")).replace("Z", " "))
     except (TypeError, ValueError):
-        return jsonify({"error":"Data/ora non valida (ISO8601)"}), 400
+        return jsonify({"error": "Data/ora non valida (ISO8601)"}), 400
     gid = None
     if data.get("group_id"):
         gid = int(data["group_id"])
-        if not _gruppo_mem(session["username"], gid): return jsonify({"error":"Gruppo non consentito"}), 403
+        if not _gruppo_mem(session["username"], gid): return jsonify({"error": "Gruppo non consentito"}), 403
     ev = ExamEvent(scuola=sc, group_id=gid, materia=(data.get("materia") or "").strip()[:100] or None,
                    titolo=tit, note=(data.get("note") or "").strip(), quando=dq, creato_da=session["username"])
-    db.session.add(ev); db.session.commit(); return jsonify({"success":True,"evento":_exam_dict(ev)})
+    db.session.add(ev)
+    db.session.commit()
+    return jsonify({"success": True, "evento": _exam_dict(ev)})
 
 @app.route("/api/eventi-esame/<int:eid>", methods=["DELETE"])
 def api_eventi_delete(eid):
-    if not login_required(): return jsonify({"error":"Non autorizzato"}), 403
+    if not login_required(): return jsonify({"error": "Non autorizzato"}), 403
     ev = ExamEvent.query.get(eid)
-    if not ev: return jsonify({"error":"Non trovato"}), 404
-    if ev.creato_da != session["username"] and not admin_required(): return jsonify({"error":"Non autorizzato"}), 403
-    db.session.delete(ev); db.session.commit(); return jsonify({"success":True})
+    if not ev: return jsonify({"error": "Non trovato"}), 404
+    if ev.creato_da != session["username"] and not admin_required(): return jsonify({"error": "Non autorizzato"}), 403
+    db.session.delete(ev)
+    db.session.commit()
+    return jsonify({"success": True})
 
 @app.route("/api/gruppi", methods=["GET", "POST"])
 @limiter.limit("40/day;12/hour", methods=["POST"])
 def api_gruppi():
-    if not login_required(): return jsonify({"error":"Non autorizzato"}), 403
+    if not login_required(): return jsonify({"error": "Non autorizzato"}), 403
     uid = User.query.filter_by(username=session["username"]).first()
     if request.method == "GET":
         sc = (request.args.get("scuola") or uid.scuola or "").strip()
         q = UserGroup.query
         if sc: q = q.filter(UserGroup.scuola.ilike(sc))
-        return jsonify([{"id":g.id,"nome":g.nome,"slug":g.slug,"scuola":g.scuola,"creator":g.creator,"descrizione":g.descrizione,
-                         "quando":g.quando.strftime("%Y-%m-%d %H:%M:%S") if g.quando else None} for g in q.order_by(UserGroup.quando.desc()).limit(200).all()])
+        return jsonify([{"id": g.id, "nome": g.nome, "slug": g.slug, "scuola": g.scuola, "creator": g.creator, "descrizione": g.descrizione,
+                         "quando": g.quando.strftime("%Y-%m-%d %H:%M:%S") if g.quando else None} for g in q.order_by(UserGroup.quando.desc()).limit(200).all()])
     data = request.get_json(force=True, silent=True) or {}
     nome = (data.get("nome") or "").strip()[:120]
-    if not nome: return jsonify({"error":"Nome gruppo obbligatorio"}), 400
+    if not nome: return jsonify({"error": "Nome gruppo obbligatorio"}), 400
     sc = ((data.get("scuola") or uid.scuola or "").strip()[:150])
-    if not sc: return jsonify({"error":"Scuola richiesta sul profilo o nel body"}), 400
+    if not sc: return jsonify({"error": "Scuola richiesta sul profilo o nel body"}), 400
     if not _sam_sc(uid, sc):
-        return jsonify({"error":"Il gruppo deve appartenere alla tua scuola registrata"}), 403
+        return jsonify({"error": "Il gruppo deve appartenere alla tua scuola registrata"}), 403
     slug = uuid.uuid4().hex[:14]
     while UserGroup.query.filter_by(slug=slug).first():
         slug = uuid.uuid4().hex[:14]
     g = UserGroup(nome=nome, slug=slug, scuola=sc, creator=session["username"], descrizione=(data.get("descrizione") or "").strip())
-    db.session.add(g); db.session.commit()
+    db.session.add(g)
+    db.session.commit()
     db.session.add(GroupMember(group_id=g.id, username=session["username"], ruolo="creator"))
-    db.session.commit(); return jsonify({"success":True,"gruppo":{"id":g.id,"slug":g.slug}})
+    db.session.commit()
+    return jsonify({"success": True, "gruppo": {"id": g.id, "slug": g.slug}})
 
 @app.route("/api/gruppi/<int:gid>/unisciti", methods=["POST"])
 @limiter.limit("120/day;50/hour", methods=["POST"])
 def api_gruppo_unisciti(gid):
-    if not login_required(): return jsonify({"error":"Non autorizzato"}), 403
+    if not login_required(): return jsonify({"error": "Non autorizzato"}), 403
     g = UserGroup.query.get(gid)
-    if not g: return jsonify({"error":"Non trovato"}), 404
+    if not g: return jsonify({"error": "Non trovato"}), 404
     uobj = User.query.filter_by(username=session["username"]).first()
-    if not _sam_sc(uobj, g.scuola): return jsonify({"error":"Puoi unirti solo a gruppi della tua scuola"}), 403
+    if not _sam_sc(uobj, g.scuola): return jsonify({"error": "Puoi unirti solo a gruppi della tua scuola"}), 403
     if GroupMember.query.filter_by(group_id=gid, username=session["username"]).first():
-        return jsonify({"success":True,"message":"Già membro"})
+        return jsonify({"success": True, "message": "Già membro"})
     db.session.add(GroupMember(group_id=gid, username=session["username"], ruolo="membro"))
-    db.session.commit(); return jsonify({"success":True})
+    db.session.commit()
+    return jsonify({"success": True})
 
 @app.route("/api/gruppi/<int:gid>/membri", methods=["POST", "DELETE"])
 @limiter.limit("300/day;120/hour", methods=["POST", "DELETE"])
 def api_gruppo_membri(gid):
-    if not login_required(): return jsonify({"error":"Non autorizzato"}), 403
+    if not login_required(): return jsonify({"error": "Non autorizzato"}), 403
     g = UserGroup.query.get(gid)
-    if not g: return jsonify({"error":"Non trovato"}), 404
+    if not g: return jsonify({"error": "Non trovato"}), 404
     row = GroupMember.query.filter_by(group_id=gid, username=session["username"]).first()
     if request.method == "POST":
         if not row or row.ruolo not in ("creator", "admin"):
-            return jsonify({"error":"Solo il creatore può aggiungere"}), 403
+            return jsonify({"error": "Solo il creatore può aggiungere"}), 403
         data = request.get_json(force=True, silent=True) or {}
         nu = (data.get("username") or "").strip()
-        if not User.query.filter_by(username=nu).first(): return jsonify({"error":"Utente sconosciuto"}), 404
+        if not User.query.filter_by(username=nu).first(): return jsonify({"error": "Utente sconosciuto"}), 404
         uadd = User.query.filter_by(username=nu).first()
-        if not _sam_sc(uadd, g.scuola): return jsonify({"error":"L'utente non appartiene alla stessa scuola"}), 400
+        if not _sam_sc(uadd, g.scuola): return jsonify({"error": "L'utente non appartiene alla stessa scuola"}), 400
         if GroupMember.query.filter_by(group_id=gid, username=nu).first():
-            return jsonify({"success":True})
-        db.session.add(GroupMember(group_id=gid, username=nu, ruolo="membro")); db.session.commit()
+            return jsonify({"success": True})
+        db.session.add(GroupMember(group_id=gid, username=nu, ruolo="membro"))
+        db.session.commit()
         crea_notifica(nu, "sistema", "Aggiunto a un gruppo", f"{session['username']} ti ha aggiunto al gruppo «{g.nome}»", "/user#gruppi")
-        return jsonify({"success":True})
+        return jsonify({"success": True})
     if not row:
-        return jsonify({"error":"Non sei nel gruppo"}), 403
-    db.session.delete(row); db.session.commit(); return jsonify({"success":True})
+        return jsonify({"error": "Non sei nel gruppo"}), 403
+    db.session.delete(row)
+    db.session.commit()
+    return jsonify({"success": True})
 
 @app.route("/api/utenti/cerca", methods=["GET"])
 def api_utenti_cerca():
-    if not login_required(): return jsonify({"error":"Non autorizzato"}), 403
+    if not login_required(): return jsonify({"error": "Non autorizzato"}), 403
     qtxt = request.args.get("q", "").strip().lower()
     if len(qtxt) < 2: return jsonify([])
     hits = []
     for u in User.query.filter(or_(User.username.ilike(f"%{qtxt}%"), User.nome_cognome.ilike(f"%{qtxt}%"))).limit(25):
         if u.username == session["username"]: continue
-        hits.append({"username":u.username,"nome_cognome":u.nome_cognome,"scuola":u.scuola,"role":u.role})
+        hits.append({"username": u.username, "nome_cognome": u.nome_cognome, "scuola": u.scuola, "role": u.role})
     return jsonify(hits)
 
 @app.route("/api/social/follow/<username>", methods=["POST", "DELETE"])
 @limiter.limit("500/day;160/hour", methods=["POST", "DELETE"])
 def api_social_follow(username):
-    if not login_required(): return jsonify({"error":"Non autorizzato"}), 403
+    if not login_required(): return jsonify({"error": "Non autorizzato"}), 403
     who = (username or "").strip()
-    if not who or who == session["username"]: return jsonify({"error":"Non valido"}), 400
-    if not User.query.filter_by(username=who).first(): return jsonify({"error":"Utente non trovato"}), 404
+    if not who or who == session["username"]: return jsonify({"error": "Non valido"}), 400
+    if not User.query.filter_by(username=who).first(): return jsonify({"error": "Utente non trovato"}), 404
     if request.method == "POST":
         if UserFollow.query.filter_by(follower=session["username"], followed=who).first():
-            return jsonify({"success":True})
-        db.session.add(UserFollow(follower=session["username"], followed=who)); db.session.commit()
-        return jsonify({"success":True})
+            return jsonify({"success": True})
+        db.session.add(UserFollow(follower=session["username"], followed=who))
+        db.session.commit()
+        return jsonify({"success": True})
     UserFollow.query.filter_by(follower=session["username"], followed=who).delete()
-    db.session.commit(); return jsonify({"success":True})
+    db.session.commit()
+    return jsonify({"success": True})
 
 @app.route("/api/social/follow", methods=["GET"])
 def api_social_follow_list():
-    if not login_required(): return jsonify({"error":"Non autorizzato"}), 403
+    if not login_required(): return jsonify({"error": "Non autorizzato"}), 403
     fl = [r.followed for r in UserFollow.query.filter_by(follower=session["username"]).all()]
-    return jsonify({"seguiti":fl})
+    return jsonify({"seguiti": fl})
 
 @app.route("/api/preferiti", methods=["GET", "POST"])
 @limiter.limit("300/day;120/hour", methods=["POST"])
 def api_preferiti():
-    if not login_required(): return jsonify({"error":"Non autorizzato"}), 403
+    if not login_required(): return jsonify({"error": "Non autorizzato"}), 403
     if request.method == "GET":
         rows = ProfessorFavorite.query.filter_by(username=session["username"]).all()
-        return jsonify([{"id":r.id,"chiave_prof":r.chiave_prof,"etichetta":r.professore_etichetta,"professor_id":r.professor_id} for r in rows])
+        return jsonify([{"id": r.id, "chiave_prof": r.chiave_prof, "etichetta": r.professore_etichetta, "professor_id": r.professor_id} for r in rows])
     data = request.get_json(force=True, silent=True) or {}
     pid = data.get("professor_id")
     try:
@@ -2330,130 +2759,159 @@ def api_preferiti():
     ck = chiav_prof(pref_id=pid_i, nome=nome, mat=mat, scuola=sc)
     eti = (data.get("etichetta") or nome or f"Prof {pid_i or ''}").strip()[:220]
     if ProfessorFavorite.query.filter_by(username=session["username"], chiave_prof=ck).first():
-        return jsonify({"success":True,"message":"Già presente"})
+        return jsonify({"success": True, "message": "Già presente"})
     db.session.add(ProfessorFavorite(username=session["username"], professor_id=pid_i, chiave_prof=ck, professore_etichetta=eti))
-    db.session.commit(); return jsonify({"success":True})
+    db.session.commit()
+    return jsonify({"success": True})
 
 @app.route("/api/preferiti/<int:pid>", methods=["DELETE"])
 def api_preferiti_del(pid):
-    if not login_required(): return jsonify({"error":"Non autorizzato"}), 403
+    if not login_required(): return jsonify({"error": "Non autorizzato"}), 403
     r = ProfessorFavorite.query.get(pid)
-    if not r or r.username != session["username"]: return jsonify({"error":"Non trovato"}), 404
-    db.session.delete(r); db.session.commit(); return jsonify({"success":True})
+    if not r or r.username != session["username"]: return jsonify({"error": "Non trovato"}), 404
+    db.session.delete(r)
+    db.session.commit()
+    return jsonify({"success": True})
 
 @app.route("/api/admin/banner", methods=["GET", "PUT"])
 def api_admin_banner():
-    if not admin_required(): return jsonify({"error":"Solo admin"}), 403
+    if not admin_required(): return jsonify({"error": "Solo admin"}), 403
     ensure_banner_singleton()
     b = SiteBanner.query.get(1)
     if request.method == "GET":
-        return jsonify({"attivo":b.attivo,"messaggio":b.messaggio,"aggiornato":b.aggiornato.strftime("%Y-%m-%d %H:%M:%S") if b.aggiornato else None})
+        return jsonify({"attivo": b.attivo, "messaggio": b.messaggio, "aggiornato": b.aggiornato.strftime("%Y-%m-%d %H:%M:%S") if b.aggiornato else None})
     data = request.get_json(force=True, silent=True) or {}
     if "attivo" in data: b.attivo = bool(data["attivo"])
     if "messaggio" in data: b.messaggio = (data.get("messaggio") or "")[:600]
-    db.session.commit(); log_audit("site_banner"); return jsonify({"success":True})
+    db.session.commit()
+    log_audit("site_banner")
+    return jsonify({"success": True})
 
 @app.route("/api/admin/banned-ip", methods=["GET", "POST"])
 def api_admin_banned_ip():
-    if not admin_required(): return jsonify({"error":"Solo admin"}), 403
+    if not admin_required(): return jsonify({"error": "Solo admin"}), 403
     if request.method == "GET":
-        return jsonify([{"id":r.id,"ip":r.ip,"motivo":r.motivo,"creato_il":r.creato_il.strftime("%Y-%m-%d %H:%M:%S") if r.creato_il else None,
-                         "banned_by":r.banned_by} for r in BannedIP.query.order_by(BannedIP.creato_il.desc()).all()])
+        return jsonify([{"id": r.id, "ip": r.ip, "motivo": r.motivo, "creato_il": r.creato_il.strftime("%Y-%m-%d %H:%M:%S") if r.creato_il else None,
+                         "banned_by": r.banned_by} for r in BannedIP.query.order_by(BannedIP.creato_il.desc()).all()])
     data = request.get_json(force=True, silent=True) or {}
     ip = (data.get("ip") or "").strip()
-    if not ip: return jsonify({"error":"IP richiesto"}), 400
-    if BannedIP.query.filter_by(ip=ip).first(): return jsonify({"error":"Già bannato"}), 400
+    if not ip: return jsonify({"error": "IP richiesto"}), 400
+    if BannedIP.query.filter_by(ip=ip).first(): return jsonify({"error": "Già bannato"}), 400
     row = BannedIP(ip=ip, motivo=(data.get("motivo") or "").strip(), banned_by=session["username"])
-    db.session.add(row); db.session.commit(); log_audit("ip_ban", dettagli={"ip":ip}); return jsonify({"success":True,"id":row.id})
+    db.session.add(row)
+    db.session.commit()
+    log_audit("ip_ban", dettagli={"ip": ip})
+    return jsonify({"success": True, "id": row.id})
 
 @app.route("/api/admin/banned-ip/<int:bid>", methods=["DELETE"])
 def api_admin_banned_ip_del(bid):
-    if not admin_required(): return jsonify({"error":"Solo admin"}), 403
+    if not admin_required(): return jsonify({"error": "Solo admin"}), 403
     r = BannedIP.query.get(bid)
-    if not r: return jsonify({"error":"Non trovato"}), 404
-    db.session.delete(r); db.session.commit(); return jsonify({"success":True})
+    if not r: return jsonify({"error": "Non trovato"}), 404
+    db.session.delete(r)
+    db.session.commit()
+    return jsonify({"success": True})
 
 @app.route("/api/admin/newsletter", methods=["POST"])
 def api_admin_newsletter():
-    if not admin_required(): return jsonify({"error":"Solo admin"}), 403
+    if not admin_required(): return jsonify({"error": "Solo admin"}), 403
     data = request.get_json(force=True, silent=True) or {}
     subj = (data.get("subject") or data.get("oggetto") or "").strip()
     body = (data.get("html") or data.get("corpo") or "").strip()
     anche_admin = bool(data.get("anche_admin"))
-    if not subj or not body: return jsonify({"error":"subject e html richiesti"}), 400
-    if not EMAIL_PASSWORD: return jsonify({"error":"SMTP non configurato (EMAIL_PASSWORD)"}), 503
+    if not subj or not body: return jsonify({"error": "subject e html richiesti"}), 400
+    if not EMAIL_PASSWORD: return jsonify({"error": "SMTP non configurato (EMAIL_PASSWORD)"}), 503
     q = User.query
     if not anche_admin:
         q = q.filter_by(role="user")
     ok, ko = 0, 0
     for u in q.all():
         em = (u.email or "").strip()
-        if not em or "@" not in em: ko += 1; continue
+        if not em or "@" not in em:
+            ko += 1
+            continue
         if invia_email_newsletter(em, subj, body): ok += 1
         else: ko += 1
-    log_audit("newsletter_bulk", dettagli={"ok":ok,"ko":ko})
-    return jsonify({"success":True,"inviati":ok,"saltati":ko})
+    log_audit("newsletter_bulk", dettagli={"ok": ok, "ko": ko})
+    return jsonify({"success": True, "inviati": ok, "saltati": ko})
 
 @app.route("/api/admin/ticket-templates", methods=["GET", "POST"])
 def api_admin_ticket_templates():
-    if not admin_required(): return jsonify({"error":"Solo admin"}), 403
+    if not admin_required(): return jsonify({"error": "Solo admin"}), 403
     if request.method == "GET":
-        return jsonify([{"id":t.id,"nome":t.nome,"oggetto":t.oggetto,"corpo":t.corpo,"tipo":t.tipo} for t in TicketTemplate.query.all()])
+        return jsonify([{"id": t.id, "nome": t.nome, "oggetto": t.oggetto, "corpo": t.corpo, "tipo": t.tipo} for t in TicketTemplate.query.all()])
     data = request.get_json(force=True, silent=True) or {}
-    if not (data.get("nome") and data.get("corpo")): return jsonify({"error":"nome e corpo obbligatori"}), 400
+    if not (data.get("nome") and data.get("corpo")): return jsonify({"error": "nome e corpo obbligatori"}), 400
     t = TicketTemplate(nome=data["nome"].strip()[:120], oggetto=(data.get("oggetto") or "").strip()[:200],
                        corpo=data["corpo"].strip(), tipo=(data.get("tipo") or "generale")[:40])
-    db.session.add(t); db.session.commit(); return jsonify({"success":True,"id":t.id})
+    db.session.add(t)
+    db.session.commit()
+    return jsonify({"success": True, "id": t.id})
 
 @app.route("/api/admin/ticket-templates/<int:tid>", methods=["PUT", "DELETE"])
 def api_admin_ticket_templates_mod(tid):
-    if not admin_required(): return jsonify({"error":"Solo admin"}), 403
+    if not admin_required(): return jsonify({"error": "Solo admin"}), 403
     t = TicketTemplate.query.get(tid)
-    if not t: return jsonify({"error":"Non trovato"}), 404
+    if not t: return jsonify({"error": "Non trovato"}), 404
     if request.method == "DELETE":
-        db.session.delete(t); db.session.commit(); return jsonify({"success":True})
+        db.session.delete(t)
+        db.session.commit()
+        return jsonify({"success": True})
     data = request.get_json(force=True, silent=True) or {}
-    for fld in ("nome","oggetto","corpo","tipo"):
-        if fld in data and data[fld] is not None: setattr(t, fld, str(data[fld])[:500 if fld=="corpo" else 200])
-    db.session.commit(); return jsonify({"success":True})
+    for fld in ("nome", "oggetto", "corpo", "tipo"):
+        if fld in data and data[fld] is not None: setattr(t, fld, str(data[fld])[:500 if fld == "corpo" else 200])
+    db.session.commit()
+    return jsonify({"success": True})
 
 @app.route("/api/admin/system-reset", methods=["POST"])
 def api_admin_system_reset():
-    if not admin_required(): return jsonify({"error":"Solo admin"}), 403
+    if not admin_required(): return jsonify({"error": "Solo admin"}), 403
     if not is_founder_user(session.get("username")):
-        return jsonify({"error":"Solo il founder può accedere a questa funzione"}), 403
+        return jsonify({"error": "Solo il founder può accedere a questa funzione"}), 403
     data = request.get_json(force=True, silent=True) or {}
     pwd = str(data.get("password") or "")
     confirm = str(data.get("confirm") or "")
-    expected = os.getenv("RESET_PANEL_PASSWORD", "Francesco@1")
+    expected = os.getenv("RESET_PANEL_PASSWORD", "alfadeltaadmin@202")
     if pwd != expected:
         log_audit("system_reset_denied", esito="ko")
-        return jsonify({"error":"Password sicurezza errata"}), 403
+        return jsonify({"error": "Password sicurezza errata"}), 403
     if confirm != "RESET-SYSTEM":
-        return jsonify({"error":"Conferma non valida (usa RESET-SYSTEM)"}), 400
-    # Reset controllato: preserva account founder e tabelle di base
+        return jsonify({"error": "Conferma non valida (usa RESET-SYSTEM)"}), 400
+        
     keep_user = session.get("username")
-    Vote.query.delete(); Review.query.delete(); Professor.query.delete()
-    Ticket.query.delete(); Report.query.delete(); Notice.query.delete()
-    SessionLog.query.delete(); RegistrationRequest.query.delete()
-    Notification.query.delete(); NotificationPreference.query.delete()
-    PrivacyRequest.query.delete(); StudyMaterial.query.delete()
-    ExamEvent.query.delete(); UserGroup.query.delete(); GroupMember.query.delete()
-    UserFollow.query.delete(); ProfessorFavorite.query.delete()
-    BannedIP.query.delete(); TicketTemplate.query.delete(); LoginHistory.query.delete()
-    Subject.query.delete(); School.query.delete()
+    Vote.query.delete()
+    Review.query.delete()
+    Professor.query.delete()
+    Ticket.query.delete()
+    Report.query.delete()
+    Notice.query.delete()
+    SessionLog.query.delete()
+    RegistrationRequest.query.delete()
+    Notification.query.delete()
+    NotificationPreference.query.delete()
+    PrivacyRequest.query.delete()
+    StudyMaterial.query.delete()
+    ExamEvent.query.delete()
+    UserGroup.query.delete()
+    GroupMember.query.delete()
+    UserFollow.query.delete()
+    ProfessorFavorite.query.delete()
+    BannedIP.query.delete()
+    TicketTemplate.query.delete()
+    LoginHistory.query.delete()
+    Subject.query.delete()
+    School.query.delete()
     for u in User.query.all():
         if u.username != keep_user:
             db.session.delete(u)
     ensure_banner_singleton()
     db.session.commit()
     log_audit("system_reset_done")
-    return jsonify({"success":True,"message":"Reset completato"})
+    return jsonify({"success": True, "message": "Reset completato"})
 
 # =====================================================
 # ============= AVVIO APPLICAZIONE ====================
 # =====================================================
-
 if __name__ == "__main__":
     with app.app_context():
         db.create_all()
@@ -2464,11 +2922,13 @@ if __name__ == "__main__":
         if not RoleDef.query.filter_by(nome="user").first():
             db.session.add(RoleDef(nome="user", is_system=True))
         db.session.commit()
-        # Crea admin di default se non esiste
+        
         if not User.query.filter_by(role="admin").first():
-            admin = User(username="admin", password=password_hash("admin123"),
-                         email="admin@registro.local", role="admin", account_status="attivo")
-            db.session.add(admin); db.session.commit()
-            print("[setup] Admin creato: username='admin', password='admin123' — CAMBIALA!")
+            admin = User(username="admin", password=password_hash("alfadeltaadmin@202"),
+                         email="assistenzaregistroprof@outlook.com", role="admin", account_status="attivo")
+            db.session.add(admin)
+            db.session.commit()
+            print("[setup] Admin creato: username='admin', password='alfadeltaadmin@202' — CAMBIALA!")
+            
     print("[RegistroProf] Server http://localhost:5000")
     app.run(debug=True, host="0.0.0.0", port=5000)
